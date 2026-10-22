@@ -494,9 +494,10 @@ function renderJob(id) {
         <div class="row"><div class="money-big grow">${saleAmount(j) || j.status === '취소' ? amt(Number(j.amount) || 0) : '<span class="faint" style="font-size:20px">금액 입력</span>'}</div><span class="pill">${vatShort(j.vat)}</span></div>
       </button>
       ${j.vat === 'excl' && saleAmount(j) ? `<div class="kv"><span class="muted">부가세 10%</span><span class="v">+${num(vatExtra(j))}원</span></div><div class="kv"><span class="muted">받을 금액</span><span class="v">${won(billed(j))}</span></div>` : ''}
-      ${(j.payments || []).map((p, i) => `<button class="pay" data-pay="${i}"><span class="grow"><b>${md(p.date)}</b> <span class="muted">${esc(p.method || '')}${p.bank ? ' · ' + esc(p.bank) : ''}</span></span><b class="money">${won(p.amount)}</b></button>`).join('')}
+      ${(j.payments || []).map((p, i) => `<button class="pay" data-pay="${i}"><span class="grow"><b>${md(p.date)}</b> <span class="muted">${esc(p.method || '')}${p.bank ? ' · ' + esc(p.bank) : ''}</span></span><b class="money">${won(p.amount)}</b><span class="faint" style="display:flex">${ic('edit')}</span></button>`).join('')}
+      ${(j.payments || []).length ? '<div class="faint small" style="margin-top:2px">입금 줄을 누르면 수정하거나 취소할 수 있어요</div>' : ''}
       ${billed(j) ? `<div class="kv total"><span>${!unpaid(j) ? '입금 완료' : isReceivable(j) ? '남은 금액(미수)' : '받을 금액'}</span><span class="v" style="color:${!unpaid(j) ? 'var(--green)' : isReceivable(j) ? 'var(--red)' : 'inherit'}">${won(unpaid(j))}</span></div>` : ''}
-      <button class="add-line" id="j-addpay">${ic('plus')} 입금 기록</button>
+      <div class="btns"><button class="add-line" id="j-addpay">${ic('plus')} 입금 기록</button>${(j.payments || []).length ? `<button class="add-line" id="j-unpay" style="color:var(--red)">미입금으로 되돌리기</button>` : ''}</div>
       <hr class="sep" />
       <div class="toggle-row"><span class="lbl">세금계산서</span>
         <div class="chips" style="flex:1"><button class="chip sm ${!ti.need ? 'on' : ''}" data-ti="none">해당없음</button><button class="chip sm ${ti.need && !ti.issued ? 'on' : ''}" data-ti="need">발행 필요</button><button class="chip sm ${ti.issued ? 'on' : ''}" data-ti="issued">발행 완료</button></div>
@@ -543,6 +544,7 @@ function renderJob(id) {
   $$('[data-status]').forEach((b) => (b.onclick = () => save('jobs', { ...j, status: b.dataset.status })));
   $('#j-amount').onclick = () => amountSheet(j);
   $('#j-addpay').onclick = () => paymentSheet(j);
+  $('#j-unpay') && ($('#j-unpay').onclick = () => clearPayments(j));
   $$('[data-pay]').forEach((b) => (b.onclick = () => paymentSheet(j, Number(b.dataset.pay))));
   $$('[data-ti]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.ti;
@@ -613,7 +615,8 @@ function paymentSheet(j, idx) {
     <label class="field"><span>입금일</span><input type="date" id="pa-date" value="${esc(p.date)}" /></label>
     <div class="field"><span>결제수단</span>${chipRow('method', PAY_METHODS, p.method)}</div>
     <div class="field" id="pa-bankf"><span>입금 은행</span>${chipRow('bank', banks, p.bank, 'scroll')}</div>
-    <div class="foot btns">${isNew ? '' : '<button class="btn danger" id="pa-del" style="flex:0 0 96px">삭제</button>'}<button class="btn" id="pa-save">저장</button></div>`);
+    ${isNew ? '' : `<button class="btn danger block" id="pa-del" style="margin-bottom:6px">${ic('trash')} 이 입금 취소 (미입금으로 되돌리기)</button>`}
+    <div class="foot"><button class="btn block" id="pa-save">저장</button></div>`);
   moneyInput($('#pa-amt', s));
   const showBank = () => ($('#pa-bankf', s).hidden = chipVal(s, 'method') !== '계좌이체');
   bindChips(s, 'method', showBank);
@@ -627,18 +630,30 @@ function paymentSheet(j, idx) {
     const pays = [...(j.payments || [])];
     if (isNew) pays.push(np);
     else pays[idx] = np;
-    const nj = { ...j, payments: pays };
-    // 다 받았고 작업이 끝났으면 정산완료로
-    if (j.status === '작업완료' && unpaid(nj) === 0) nj.status = '정산완료';
+    const nj = fixPaidStatus({ ...j, payments: pays });
     save('jobs', nj);
     closeSheet();
     toast(nj.status === '정산완료' && j.status !== '정산완료' ? '입금 완료 · 정산완료로 바꿨어요' : '입금을 기록했어요');
   };
   $('#pa-del', s) && ($('#pa-del', s).onclick = () => {
-    if (!confirm('이 입금 기록을 지울까요?')) return;
-    save('jobs', { ...j, payments: j.payments.filter((_, i) => i !== idx) });
+    if (!confirm(`${md(p.date)} ${won(p.amount)} 입금을 취소할까요?`)) return;
+    save('jobs', fixPaidStatus({ ...j, payments: j.payments.filter((_, i) => i !== idx) }));
     closeSheet();
+    toast('입금을 취소했어요');
   });
+}
+
+// 다 받았으면 정산완료로, 입금을 취소해 받을 돈이 생기면 작업완료로 되돌림
+function fixPaidStatus(nj) {
+  if (nj.status === '작업완료' && billed(nj) && unpaid(nj) === 0) return { ...nj, status: '정산완료' };
+  if (nj.status === '정산완료' && unpaid(nj) > 0) return { ...nj, status: '작업완료' };
+  return nj;
+}
+
+function clearPayments(j) {
+  if (!confirm(`입금 기록 ${j.payments.length}건(${won(paidSum(j))})을 모두 지우고 미입금으로 되돌릴까요?`)) return;
+  save('jobs', fixPaidStatus({ ...j, payments: [] }));
+  toast('미입금으로 되돌렸어요');
 }
 
 function reviewSheet(j) {

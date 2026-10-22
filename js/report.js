@@ -73,7 +73,9 @@ export async function exportExcel(r) {
     [],
     ['항목', '금액(원)', '비고'],
     ['작업 건수', r.jobCount, '취소 제외'],
-    ['매출 합계', r.salesTotal, '입력한 금액 기준'],
+    ['매출 합계', r.salesTotal, '최종 금액 기준 (견적 − 할인 + 추가)'],
+    ['할인 합계', r.jobs.reduce((s, j) => s + (Number(j.discount) || 0), 0), ''],
+    ['추가 합계', r.jobs.reduce((s, j) => s + (Number(j.extra) || 0), 0), ''],
     ['부가세 별도로 받을 금액', r.vatExtraTotal, '부가세 별도 건의 10%'],
     ['입금 합계', r.paidTotal, '입금일 기준'],
     ['매입 합계', r.buyTotal, `현장 ${r.siteBuy.toLocaleString()} / 공통 ${r.commonBuy.toLocaleString()}`],
@@ -103,15 +105,17 @@ export async function exportExcel(r) {
   XLSX.utils.book_append_sheet(wb, sheet(XLSX, summary, [26, 16, 28, 14]), '요약');
 
   const jobsRows = [
-    ['작업일', '시간', '고객', '연락처', '현장 주소', '유입경로', '작업내역', '상태', '매출금액', '부가세', '받을 금액', '입금액', '미수금', '입금상태', '세금계산서', '발행일', '현장 매입', '현장 순이익', '후기', '특이사항'],
+    ['작업일', '시간', '고객', '연락처', '현장 주소', '유입경로', '작업내역', '상태', '견적금액', '할인', '추가', '할인·추가 내용', '최종 금액', '부가세', '받을 금액', '입금액', '미수금', '입금상태', '세금계산서', '발행일', '현장 매입', '현장 순이익', '후기', '특이사항'],
     ...[...r.jobs].sort((a, b) => a.date.localeCompare(b.date)).map((j) => [
       j.date, j.time || '', custName(cust(j)), cust(j)?.phone || '', j.address || '', j.source || '', j.work || '', j.status,
+      Number(j.amount) || 0, Number(j.discount) || 0, Number(j.extra) || 0,
+      [j.discountNote && '할인: ' + j.discountNote, j.extraNote && '추가: ' + j.extraNote].filter(Boolean).join(' / '),
       saleAmount(j), vatLabel(j.vat), billed(j), paidSum(j), unpaid(j), payState(j),
       j.taxInvoice?.need ? (j.taxInvoice.issued ? '발행완료' : '미발행') : '해당없음', j.taxInvoice?.date || '',
       jobCost(j.id), saleAmount(j) - jobCost(j.id), j.review?.text || '', j.note || '',
     ]),
   ];
-  XLSX.utils.book_append_sheet(wb, sheet(XLSX, jobsRows, [11, 6, 18, 14, 28, 9, 28, 9, 11, 11, 11, 11, 11, 9, 10, 11, 11, 11, 24, 24]), '작업내역');
+  XLSX.utils.book_append_sheet(wb, sheet(XLSX, jobsRows, [11, 6, 18, 14, 28, 9, 28, 9, 11, 10, 10, 24, 11, 11, 11, 11, 11, 9, 10, 11, 11, 11, 24, 24]), '작업내역');
 
   const payRows = [
     ['입금일', '고객', '현장 주소', '작업내역', '결제수단', '입금은행', '입금액', '부가세', '세금계산서'],

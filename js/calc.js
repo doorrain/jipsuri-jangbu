@@ -4,8 +4,10 @@ import { store } from './store.js';
 const floor10 = (n) => Math.floor(n / 10) * 10;
 
 /* ---------- 작업(매출) ---------- */
-// 매출 금액 = 입력한 금액. 부가세 별도면 받을 금액은 10%를 더한 금액.
-export const saleAmount = (job) => (job.status === '취소' ? 0 : Number(job.amount) || 0);
+// 최종 금액 = 견적 금액 − 할인 + 추가. 부가세 별도면 받을 금액은 여기에 10%를 더한 금액.
+export const quoteAmount = (job) => Number(job.amount) || 0;
+export const finalAmount = (job) => Math.max(0, quoteAmount(job) - (Number(job.discount) || 0) + (Number(job.extra) || 0));
+export const saleAmount = (job) => (job.status === '취소' ? 0 : finalAmount(job));
 export const vatExtra = (job) => (job.vat === 'excl' ? Math.round(saleAmount(job) * 0.1) : 0);
 export const billed = (job) => saleAmount(job) + vatExtra(job);
 export const paidSum = (job) => (job.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);

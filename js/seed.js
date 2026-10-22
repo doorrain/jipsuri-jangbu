@@ -11,7 +11,7 @@ export const VAT_MODES = [
   { k: 'none', label: '부가세 없음' },
   { k: 'excl', label: '부가세 별도' },
 ];
-export const PHOTO_STAGES = ['작업 전', '작업 중', '작업 후', '기타'];
+export const PHOTO_STAGES = ['문의', '작업 전', '작업 중', '작업 후', '기타'];
 export const LABOR_TYPES = ['일용직', '외주(3.3%)', '기타'];
 export const PAYERS = ['남편', '아내'];
 export const REVIEW_WHERE = ['네이버', '당근', '문자', '기타'];

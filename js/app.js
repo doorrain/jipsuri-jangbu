@@ -7,11 +7,12 @@ import {
   SOURCES, STATUSES, STATUS_CLASS, PAY_METHODS, BUY_METHODS, BUY_CATS, VAT_MODES, PHOTO_STAGES, LABOR_TYPES, PAYERS, REVIEW_WHERE,
 } from './seed.js';
 import {
-  saleAmount, vatExtra, billed, paidSum, unpaid, payState, isReceivable, needsInvoice, jobPurchases, jobCost, jobProfit,
+  saleAmount, finalAmount, vatExtra, billed, paidSum, unpaid, payState, isReceivable, needsInvoice, jobPurchases, jobCost, jobProfit,
   customerOf, custName, customerJobs, customerStats, laborCalc, inRange,
 } from './calc.js';
 import { uploadPhotos, deletePhotos, photoUrls, downloadOne, downloadZip, usedBytes } from './photos.js';
 import { parseInquiry } from './parse.js';
+import { readImageText } from './ocr.js';
 import { summarize, exportExcel } from './report.js';
 import { ic } from './icons.js';
 
@@ -294,8 +295,10 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
   const s = openSheet(`
     ${sheetHead(isNew ? '새 일정' : '일정 수정')}
     ${isNew ? `<div class="paste-box" id="pb">
-      <button type="button" class="btn sm ghost" id="pb-btn" style="background:var(--card)">${ic('clip')} 문자·채팅 붙여넣기</button>
-      <div class="small muted" style="margin-top:6px">복사해 둔 문의 내용에서 번호·주소·날짜를 찾아 채워 드려요</div>
+      <div class="btns"><button type="button" class="btn sm ghost" id="pb-btn" style="background:var(--card)">${ic('clip')} 글자 붙여넣기</button>
+      <button type="button" class="btn sm ghost" id="pb-img" style="background:var(--card)">${ic('camera')} 캡처로 채우기</button></div>
+      <input type="file" id="pb-file" accept="image/*" hidden />
+      <div class="small muted" style="margin-top:6px" id="pb-msg">복사한 문의 내용이나 당근 예약 캡처에서 이름·번호·주소·날짜를 찾아 채워 드려요</div>
       <div id="pb-area" hidden style="margin-top:10px"><textarea id="pb-text" placeholder="당근·네이버·문자 내용을 여기에 붙여넣으세요"></textarea>
       <button type="button" class="btn sm" id="pb-go" style="margin-top:8px">내용으로 채우기</button></div>
     </div>` : ''}
@@ -313,11 +316,32 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     <label class="field"><span>현장 주소</span><input id="jf-addr" value="${esc(j.address)}" placeholder="예) 별내 리슈빌 2113동 102호" autocomplete="off" /></label>
     <label class="field"><span>작업내역</span><textarea id="jf-work" placeholder="예) 세면대 교체, 도어클로저 교체">${esc(j.work)}</textarea></label>
     <div class="chips" id="tag-chips" style="margin:-6px 0 16px">${tags.map((t) => `<button type="button" class="chip sm" data-tag="${esc(t)}">+ ${esc(t)}</button>`).join('')}</div>
-    <div class="grid2" style="align-items:end">${moneyField('jf-amt', '금액 (나중에 입력해도 돼요)', j.amount)}<div class="field">${chipRow('vat', VAT_MODES, j.vat || 'none')}</div></div>
+    <div class="grid2" style="align-items:end">${moneyField('jf-amt', '견적 금액 (나중에 입력해도 돼요)', j.amount)}<div class="field">${chipRow('vat', VAT_MODES, j.vat || 'none')}</div></div>
+    <div class="small" id="jf-dc-msg" hidden style="margin:-8px 0 14px;color:var(--accent);font-weight:600"></div>
     ${isNew ? '' : `<div class="field"><span>상태</span>${chipRow('status', STATUSES, j.status)}</div>`}
     <label class="field"><span>메모 · 특이사항</span><textarea id="jf-note" placeholder="출입 방법, 주차, 고객 요청 등">${esc(j.note)}</textarea></label>
+    ${isNew ? `<div class="field"><span>고객이 보낸 사진 · 문의 캡처</span>
+      <div class="photos" id="jf-prev" style="margin-bottom:8px"></div>
+      <button type="button" class="add-line" id="jf-pick" style="margin-top:0">${ic('camera')} 사진 첨부</button>
+      <input type="file" id="jf-files" accept="image/*" multiple hidden /></div>` : ''}
     <div class="foot"><button class="btn block accent" id="jf-save">${isNew ? '일정 등록' : '저장'}</button></div>
   `);
+  // 등록과 함께 올릴 사진 (고객이 보낸 현장 사진, 채팅 캡처 등)
+  let pending = [];
+  let parsedDiscount = null; // 캡처·문자에서 찾은 쿠폰 할인
+  if (isNew) {
+    const drawPrev = () => {
+      $('#jf-prev', s).innerHTML = pending.map((f, i) => `<button type="button" data-rm="${i}"><img src="${URL.createObjectURL(f)}" alt="" /><span class="st">✕ 빼기</span></button>`).join('');
+      $('#jf-pick', s).innerHTML = `${ic('camera')} ${pending.length ? `사진 더 첨부 (${pending.length}장)` : '사진 첨부'}`;
+    };
+    $('#jf-pick', s).onclick = () => $('#jf-files', s).click();
+    $('#jf-files', s).onchange = (e) => { pending = [...pending, ...e.target.files]; e.target.value = ''; drawPrev(); };
+    $('#jf-files', s).addEventListener('redraw', drawPrev);
+    $('#jf-prev', s).addEventListener('click', (e) => {
+      const b = e.target.closest('[data-rm]');
+      if (b) { pending.splice(Number(b.dataset.rm), 1); drawPrev(); }
+    });
+  }
   moneyInput($('#jf-amt', s));
   bindChips(s, 'source', null, true);
   bindChips(s, 'vat');
@@ -404,6 +428,14 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
       if (p.time) { $('#jf-time', s).value = p.time; found.push('시간'); }
       if (p.address) { $('#jf-addr', s).value = p.address; found.push('주소'); }
       if (p.source) { $$('[data-chips="source"] button', s).forEach((b) => b.classList.toggle('on', b.dataset.v === p.source)); found.push('유입경로'); }
+      if (p.amount) { $('#jf-amt', s).value = num(p.amount); found.push('금액'); }
+      if (p.discountRate) {
+        parsedDiscount = { rate: p.discountRate };
+        $('#jf-dc-msg', s).hidden = false;
+        $('#jf-dc-msg', s).textContent = `쿠폰 ${p.discountRate}% 할인이 함께 기록돼요 (최종 금액에서 빠짐)`;
+        found.push('할인');
+      }
+      if (p.work) { $('#jf-work', s).value = p.work; found.push('작업'); }
       const note = $('#jf-note', s);
       note.value = (note.value ? note.value + '\n\n' : '') + '[문의 원문]\n' + p.raw;
       const same = p.phone && store.state.customers.find((c) => digits(c.phone) === digits(p.phone));
@@ -423,6 +455,28 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
       else { $('#pb-area', s).hidden = false; $('#pb-text', s).focus(); }
     };
     $('#pb-go', s).onclick = () => applyParse($('#pb-text', s).value);
+    // 캡처 사진 → 글자 읽기 → 칸 채우기 (캡처는 '문의' 사진으로 함께 저장)
+    $('#pb-img', s).onclick = () => $('#pb-file', s).click();
+    $('#pb-file', s).onchange = async (e) => {
+      const f = e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      const msg = $('#pb-msg', s);
+      const btn = $('#pb-img', s);
+      btn.disabled = true;
+      try {
+        const text = await readImageText(f, (m) => (msg.textContent = m));
+        pending.push(f);
+        $('#jf-files', s).dispatchEvent(new Event('redraw'));
+        applyParse(text);
+        msg.textContent = '캡처에서 읽은 내용을 채웠어요. 틀린 글자가 있을 수 있으니 확인해 주세요';
+      } catch (err) {
+        console.error(err);
+        msg.textContent = '캡처를 읽지 못했어요. 인터넷 연결을 확인하거나 직접 입력해 주세요';
+      } finally {
+        btn.disabled = false;
+      }
+    };
     if (prefill) applyParse(prefill);
   }
 
@@ -442,6 +496,10 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     j.amount = parseNum($('#jf-amt', s).value);
     j.vat = chipVal(s, 'vat') || 'none';
     j.note = $('#jf-note', s).value.trim();
+    if (isNew && parsedDiscount && j.amount) {
+      j.discount = Math.round((j.amount * parsedDiscount.rate) / 100);
+      j.discountNote = `쿠폰 ${parsedDiscount.rate}% 할인`;
+    }
     if (isNew) j.status = j.date ? '예약확정' : '문의';
     else j.status = chipVal(s, 'status') || j.status;
     if (!cust.address && j.address) await save('customers', { ...cust, address: j.address });
@@ -450,6 +508,21 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     toast(isNew ? '일정을 등록했어요' : '저장했어요');
     if (afterSave) afterSave(j);
     else if (isNew) go('#job/' + j.id);
+    if (pending.length) {
+      if (store.mode === 'cloud' && !navigator.onLine) {
+        alert('일정은 등록했어요. 사진은 인터넷이 연결된 뒤 작업 화면에서 다시 올려 주세요.');
+        return;
+      }
+      try {
+        const added = await uploadPhotos(j.id, pending, '문의', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
+        const fresh = store.state.jobs.find((x) => x.id === j.id) || j;
+        await save('jobs', { ...fresh, photos: [...(fresh.photos || []), ...added] });
+        toast(`일정 등록 · 사진 ${added.length}장을 올렸어요`);
+      } catch (e) {
+        console.error(e);
+        alert('일정은 등록했지만 사진을 올리지 못했습니다. 작업 화면에서 다시 올려 주세요.');
+      }
+    }
   };
 }
 
@@ -491,7 +564,12 @@ function renderJob(id) {
     <div class="card">
       <h3>매출 · 입금 <span class="r">${payState(j) ? `<span class="pill ${payState(j) === '완납' ? 'green' : isReceivable(j) ? 'red' : ''}">${payState(j)}</span>` : ''}</span></h3>
       <button style="width:100%;text-align:left" id="j-amount">
-        <div class="row"><div class="money-big grow">${saleAmount(j) || j.status === '취소' ? amt(Number(j.amount) || 0) : '<span class="faint" style="font-size:20px">금액 입력</span>'}</div><span class="pill">${vatShort(j.vat)}</span></div>
+        <div class="row"><div class="money-big grow">${finalAmount(j) ? amt(finalAmount(j)) : '<span class="faint" style="font-size:20px">금액 입력</span>'}</div><span class="pill">${vatShort(j.vat)}</span></div>
+        ${j.discount || j.extra ? `<div class="small" style="margin-top:4px">
+            <div class="kv" style="padding:2px 0"><span class="muted">견적 금액</span><span class="v">${won(j.amount)}</span></div>
+            ${j.discount ? `<div class="kv" style="padding:2px 0"><span class="muted">할인${j.discountNote ? ` · ${esc(j.discountNote)}` : ''}</span><span class="v" style="color:var(--red)">−${num(j.discount)}원</span></div>` : ''}
+            ${j.extra ? `<div class="kv" style="padding:2px 0"><span class="muted">추가${j.extraNote ? ` · ${esc(j.extraNote)}` : ''}</span><span class="v" style="color:var(--blue)">+${num(j.extra)}원</span></div>` : ''}
+          </div>` : `<div class="small faint" style="margin-top:2px">눌러서 견적 금액 · 할인 · 추가 입력</div>`}
       </button>
       ${j.vat === 'excl' && saleAmount(j) ? `<div class="kv"><span class="muted">부가세 10%</span><span class="v">+${num(vatExtra(j))}원</span></div><div class="kv"><span class="muted">받을 금액</span><span class="v">${won(billed(j))}</span></div>` : ''}
       ${(j.payments || []).map((p, i) => `<button class="pay" data-pay="${i}"><span class="grow"><b>${md(p.date)}</b> <span class="muted">${esc(p.method || '')}${p.bank ? ' · ' + esc(p.bank) : ''}</span></span><b class="money">${won(p.amount)}</b><span class="faint" style="display:flex">${ic('edit')}</span></button>`).join('')}
@@ -581,26 +659,51 @@ async function hydrateImgs(root) {
   }
 }
 
+// 견적 금액 − 할인 + 추가 = 최종 금액
 function amountSheet(j) {
   const s = openSheet(`
     ${sheetHead('매출 금액')}
-    ${moneyField('am-v', '금액', j.amount)}
+    ${moneyField('am-v', '견적 금액', j.amount)}
+    <div class="card" style="padding:14px 14px 4px">
+      ${moneyField('am-dc', '할인', j.discount)}
+      <div class="chips" style="margin:-6px 0 10px" id="am-rate">${[5, 10, 15, 20].map((r) => `<button type="button" class="chip sm" data-rate="${r}">견적의 ${r}%</button>`).join('')}<button type="button" class="chip sm" data-rate="0">없음</button></div>
+      <label class="field"><span>할인 사유</span><input id="am-dcn" value="${esc(j.discountNote || '')}" placeholder="예) 당근 쿠폰 10%, 단골 할인" autocomplete="off" /></label>
+    </div>
+    <div class="card" style="padding:14px 14px 4px">
+      ${moneyField('am-ex', '추가 (현장에서 늘어난 금액)', j.extra)}
+      <label class="field"><span>추가 내용</span><input id="am-exn" value="${esc(j.extraNote || '')}" placeholder="예) 실리콘 추가 시공, 부품 교체" autocomplete="off" /></label>
+    </div>
+    <div class="card" id="am-sum"></div>
     <div class="field"><span>부가세</span>${chipRow('vat', VAT_MODES, j.vat || 'none')}</div>
-    <div class="muted small" id="am-hint" style="margin:-4px 0 14px"></div>
     <div class="foot"><button class="btn block" id="am-save">저장</button></div>`);
-  const inp = $('#am-v', s);
-  moneyInput(inp);
-  const hint = () => {
-    const v = parseNum(inp.value);
-    const k = chipVal(s, 'vat');
-    $('#am-hint', s).textContent = k === 'excl' && v ? `받을 금액: ${won(Math.round(v * 1.1))} (부가세 ${num(Math.round(v * 0.1))}원 포함)` : '';
+  const inp = $('#am-v', s), dc = $('#am-dc', s), ex = $('#am-ex', s);
+  [inp, dc, ex].forEach(moneyInput);
+  const vals = () => ({ q: parseNum(inp.value), d: parseNum(dc.value), e: parseNum(ex.value), k: chipVal(s, 'vat') });
+  const draw = () => {
+    const { q, d, e, k } = vals();
+    const fin = Math.max(0, q - d + e);
+    $('#am-sum', s).innerHTML = `
+      <div class="kv"><span class="muted">견적 금액</span><span class="v">${won(q)}</span></div>
+      ${d ? `<div class="kv"><span class="muted">할인</span><span class="v" style="color:var(--red)">−${num(d)}원</span></div>` : ''}
+      ${e ? `<div class="kv"><span class="muted">추가</span><span class="v" style="color:var(--blue)">+${num(e)}원</span></div>` : ''}
+      <div class="kv total"><span>최종 금액</span><span class="v">${won(fin)}</span></div>
+      ${k === 'excl' && fin ? `<div class="kv"><span class="muted">부가세 별도 → 받을 금액</span><span class="v">${won(Math.round(fin * 1.1))}</span></div>` : ''}`;
   };
-  bindChips(s, 'vat', hint);
-  inp.addEventListener('input', hint);
-  hint();
-  setTimeout(() => inp.focus(), 50);
+  $('#am-rate', s).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rate]');
+    if (!b) return;
+    const r = Number(b.dataset.rate);
+    const v = Math.round((parseNum(inp.value) * r) / 100);
+    dc.value = v ? num(v) : '';
+    if (r && !$('#am-dcn', s).value) $('#am-dcn', s).value = `${r}% 할인`;
+    draw();
+  });
+  bindChips(s, 'vat', draw);
+  [inp, dc, ex].forEach((x) => x.addEventListener('input', draw));
+  draw();
   $('#am-save', s).onclick = () => {
-    save('jobs', { ...j, amount: parseNum(inp.value), vat: chipVal(s, 'vat') || 'none' });
+    const { q, d, e, k } = vals();
+    save('jobs', fixPaidStatus({ ...j, amount: q, discount: d, discountNote: $('#am-dcn', s).value.trim(), extra: e, extraNote: $('#am-exn', s).value.trim(), vat: k || 'none' }));
     closeSheet();
   };
 }

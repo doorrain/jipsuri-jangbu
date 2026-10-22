@@ -7,7 +7,7 @@ import {
   SOURCES, STATUSES, STATUS_CLASS, PAY_METHODS, BUY_METHODS, BUY_CATS, VAT_MODES, PHOTO_STAGES, LABOR_TYPES, PAYERS, REVIEW_WHERE,
 } from './seed.js';
 import {
-  saleAmount, finalAmount, vatExtra, billed, paidSum, unpaid, payState, isReceivable, needsInvoice, jobPurchases, jobCost, jobProfit,
+  saleAmount, finalAmount, vatExtra, billed, paidSum, unpaid, payState, isReceivable, needsInvoice, jobPurchases, jobCost, jobProfit, feeSum,
   customerOf, custName, customerJobs, customerStats, laborCalc, inRange,
 } from './calc.js';
 import { uploadPhotos, deletePhotos, photoUrls, downloadOne, downloadZip, usedBytes } from './photos.js';
@@ -572,7 +572,7 @@ function renderJob(id) {
           </div>` : `<div class="small faint" style="margin-top:2px">눌러서 견적 금액 · 할인 · 추가 입력</div>`}
       </button>
       ${j.vat === 'excl' && saleAmount(j) ? `<div class="kv"><span class="muted">부가세 10%</span><span class="v">+${num(vatExtra(j))}원</span></div><div class="kv"><span class="muted">받을 금액</span><span class="v">${won(billed(j))}</span></div>` : ''}
-      ${(j.payments || []).map((p, i) => `<button class="pay" data-pay="${i}"><span class="grow"><b>${md(p.date)}</b> <span class="muted">${esc(p.method || '')}${p.bank ? ' · ' + esc(p.bank) : ''}</span></span><b class="money">${won(p.amount)}</b><span class="faint" style="display:flex">${ic('edit')}</span></button>`).join('')}
+      ${(j.payments || []).map((p, i) => `<button class="pay" data-pay="${i}"><span class="grow"><b>${md(p.date)}</b> <span class="muted">${esc(p.method || '')}${p.bank ? ' · ' + esc(p.bank) : ''}</span>${p.fee ? `<br><span class="small faint">실입금 ${num(p.deposit)} · 수수료 ${num(p.fee)}</span>` : p.method === '카드' ? '<br><span class="small faint">카드 실입금 미입력</span>' : ''}</span><b class="money">${won(p.amount)}</b><span class="faint" style="display:flex">${ic('edit')}</span></button>`).join('')}
       ${(j.payments || []).length ? '<div class="faint small" style="margin-top:2px">입금 줄을 누르면 수정하거나 취소할 수 있어요</div>' : ''}
       ${billed(j) ? `<div class="kv total"><span>${!unpaid(j) ? '입금 완료' : isReceivable(j) ? '남은 금액(미수)' : '받을 금액'}</span><span class="v" style="color:${!unpaid(j) ? 'var(--green)' : isReceivable(j) ? 'var(--red)' : 'inherit'}">${won(unpaid(j))}</span></div>` : ''}
       <div class="btns"><button class="add-line" id="j-addpay">${ic('plus')} 입금 기록</button>${(j.payments || []).length ? `<button class="add-line" id="j-unpay" style="color:var(--red)">미입금으로 되돌리기</button>` : ''}</div>
@@ -586,6 +586,7 @@ function renderJob(id) {
     <div class="card">
       <h3>현장 매입 <span class="r">${buys.length ? `${buys.length}건 · ${won(cost)}` : ''}</span></h3>
       ${buys.map((p) => `<button class="pay" data-buy="${p.id}"><span class="grow"><b>${esc(p.item || p.category || '매입')}</b> <span class="muted small">${esc([md(p.date), p.vendor, p.payer].filter(Boolean).join(' · '))}</span></span><b class="money">${won(p.amount)}</b></button>`).join('')}
+      ${feeSum(j) ? `<div class="kv"><span class="muted">카드 수수료</span><span class="v">${won(feeSum(j))}</span></div>` : ''}
       ${saleAmount(j) ? `<div class="kv total"><span>현장 순이익</span><span class="v">${won(jobProfit(j))}</span></div>` : ''}
       <button class="add-line" id="j-addbuy">${ic('plus')} 이 현장 매입 추가</button>
     </div>
@@ -714,22 +715,47 @@ function paymentSheet(j, idx) {
   const banks = store.state.settings.banks || [];
   const s = openSheet(`
     ${sheetHead(isNew ? '입금 기록' : '입금 수정')}
-    ${moneyField('pa-amt', '입금액', p.amount)}
-    <label class="field"><span>입금일</span><input type="date" id="pa-date" value="${esc(p.date)}" /></label>
     <div class="field"><span>결제수단</span>${chipRow('method', PAY_METHODS, p.method)}</div>
+    ${moneyField('pa-amt', '<span id="pa-amt-l">입금액</span>', p.amount)}
+    <div class="card" id="pa-card" style="padding:14px 14px 4px">
+      ${moneyField('pa-dep', '카드사에서 실제 들어온 금액 (수수료 뺀 금액)', p.deposit)}
+      <div class="small" id="pa-fee" style="margin:-6px 0 12px"></div>
+    </div>
+    <label class="field"><span id="pa-date-l">입금일</span><input type="date" id="pa-date" value="${esc(p.date)}" /></label>
     <div class="field" id="pa-bankf"><span>입금 은행</span>${chipRow('bank', banks, p.bank, 'scroll')}</div>
     ${isNew ? '' : `<button class="btn danger block" id="pa-del" style="margin-bottom:6px">${ic('trash')} 이 입금 취소 (미입금으로 되돌리기)</button>`}
     <div class="foot"><button class="btn block" id="pa-save">저장</button></div>`);
-  moneyInput($('#pa-amt', s));
-  const showBank = () => ($('#pa-bankf', s).hidden = chipVal(s, 'method') !== '계좌이체');
-  bindChips(s, 'method', showBank);
+  ['#pa-amt', '#pa-dep'].forEach((q) => moneyInput($(q, s)));
+  // 카드: 고객이 결제한 금액으로 미수를 맞추고, 덜 들어온 만큼은 수수료로 따로 기록
+  const drawFee = () => {
+    const a = parseNum($('#pa-amt', s).value), dep = parseNum($('#pa-dep', s).value);
+    const el = $('#pa-fee', s);
+    if (!dep) el.innerHTML = '<span class="faint">아직 안 들어왔으면 비워 두고 나중에 넣어도 돼요</span>';
+    else if (dep > a) el.innerHTML = '<span style="color:var(--red)">결제 금액보다 많아요. 금액을 확인해 주세요</span>';
+    else el.innerHTML = `카드 수수료 <b>${won(a - dep)}</b> <span class="muted">(${a ? (((a - dep) / a) * 100).toFixed(2) : 0}%)</span> — 미수금이 아닌 비용으로 처리돼요`;
+  };
+  const onMethod = () => {
+    const m = chipVal(s, 'method');
+    $('#pa-bankf', s).hidden = m !== '계좌이체';
+    $('#pa-card', s).hidden = m !== '카드';
+    $('#pa-amt-l', s).textContent = m === '카드' ? '카드 결제 금액 (고객이 결제한 금액)' : '입금액';
+    $('#pa-date-l', s).textContent = m === '카드' ? '결제일' : '입금일';
+    drawFee();
+  };
+  bindChips(s, 'method', onMethod);
   bindChips(s, 'bank', null, true);
-  showBank();
+  ['#pa-amt', '#pa-dep'].forEach((q) => $(q, s).addEventListener('input', drawFee));
+  onMethod();
   $('#pa-save', s).onclick = () => {
     const amount = parseNum($('#pa-amt', s).value);
-    if (!amount) return toast('입금액을 넣어 주세요');
+    if (!amount) return toast('금액을 넣어 주세요');
     const method = chipVal(s, 'method');
-    const np = { ...p, amount, date: $('#pa-date', s).value || today(), method, bank: method === '계좌이체' ? chipVal(s, 'bank') : '' };
+    const dep = method === '카드' ? parseNum($('#pa-dep', s).value) : 0;
+    if (dep > amount) return toast('실제 들어온 금액이 결제 금액보다 많아요');
+    const np = {
+      ...p, amount, date: $('#pa-date', s).value || today(), method, bank: method === '계좌이체' ? chipVal(s, 'bank') : '',
+      deposit: dep || 0, fee: dep ? amount - dep : 0,
+    };
     const pays = [...(j.payments || [])];
     if (isNew) pays.push(np);
     else pays[idx] = np;
@@ -1185,6 +1211,7 @@ function renderReport() {
     <div class="card">
       <div class="kv"><span class="muted">작업 건수</span><span class="v">${r.jobCount}건</span></div>
       <div class="kv"><span class="muted">입금 합계</span><span class="v">${won(r.paidTotal)}</span></div>
+      ${r.feeTotal ? `<div class="kv"><span class="muted">카드 수수료 (차익에서 뺌)</span><span class="v">${won(r.feeTotal)}</span></div>` : ''}
       ${r.vatExtraTotal ? `<div class="kv"><span class="muted">부가세 별도로 받을 금액</span><span class="v">${won(r.vatExtraTotal)}</span></div>` : ''}
       <div class="kv"><span class="muted">매입 (현장 / 공통)</span><span class="v">${num(r.siteBuy)} / ${num(r.commonBuy)}</span></div>
       <div class="kv"><span class="muted">미수금</span><span class="v" style="${r.receivableTotal ? 'color:var(--red)' : ''}">${won(r.receivableTotal)}</span></div>

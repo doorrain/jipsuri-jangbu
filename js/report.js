@@ -36,7 +36,9 @@ export function summarize(from, to) {
 
   const salesTotal = sum(sales, saleAmount);
   const buyTotal = sum(buys, (p) => p.amount);
+  const feeTotal = sum(pays, (p) => p.fee); // 카드 수수료 (결제일 기준)
   return {
+    feeTotal,
     from, to, jobs, sales, buys, pays, byVat, byMethod, byCat, byPayer, bySource, months,
     jobCount: jobs.length,
     salesTotal,
@@ -45,7 +47,7 @@ export function summarize(from, to) {
     buyTotal,
     siteBuy: sum(buys.filter((p) => p.jobId), (p) => p.amount),
     commonBuy: sum(buys.filter((p) => !p.jobId), (p) => p.amount),
-    profit: salesTotal - buyTotal,
+    profit: salesTotal - buyTotal - feeTotal,
     receivables: jobs.filter(isReceivable),
     receivableTotal: sum(jobs.filter(isReceivable), unpaid),
     invoicePending: jobs.filter(needsInvoice),
@@ -79,7 +81,8 @@ export async function exportExcel(r) {
     ['부가세 별도로 받을 금액', r.vatExtraTotal, '부가세 별도 건의 10%'],
     ['입금 합계', r.paidTotal, '입금일 기준'],
     ['매입 합계', r.buyTotal, `현장 ${r.siteBuy.toLocaleString()} / 공통 ${r.commonBuy.toLocaleString()}`],
-    ['차익 (매출 - 매입)', r.profit, ''],
+    ['카드 수수료', r.feeTotal, '카드 결제 금액 - 실제 입금액'],
+    ['차익 (매출 - 매입 - 카드 수수료)', r.profit, ''],
     ['미수금', r.receivableTotal, `${r.receivables.length}건`],
     ['세금계산서 미발행(매출)', r.invoicePending.length, '건'],
     ['세금계산서 미수취(매입)', r.buyInvoiceMissing.length, '건'],
@@ -118,13 +121,14 @@ export async function exportExcel(r) {
   XLSX.utils.book_append_sheet(wb, sheet(XLSX, jobsRows, [11, 6, 18, 14, 28, 9, 28, 9, 11, 10, 10, 24, 11, 11, 11, 11, 11, 9, 10, 11, 11, 11, 24, 24]), '작업내역');
 
   const payRows = [
-    ['입금일', '고객', '현장 주소', '작업내역', '결제수단', '입금은행', '입금액', '부가세', '세금계산서'],
+    ['입금(결제)일', '고객', '현장 주소', '작업내역', '결제수단', '입금은행', '받은 금액', '카드 실입금', '카드 수수료', '부가세', '세금계산서'],
     ...[...r.pays].sort((a, b) => a.date.localeCompare(b.date)).map((p) => [
       p.date, custName(cust(p.job)), p.job.address || '', p.job.work || '', p.method || '', p.bank || '', Number(p.amount) || 0,
+      p.method === '카드' ? Number(p.deposit) || '' : '', p.method === '카드' ? Number(p.fee) || 0 : '',
       vatLabel(p.job.vat), p.job.taxInvoice?.need ? (p.job.taxInvoice.issued ? '발행완료' : '미발행') : '해당없음',
     ]),
   ];
-  XLSX.utils.book_append_sheet(wb, sheet(XLSX, payRows, [11, 18, 28, 28, 9, 11, 12, 11, 10]), '입금내역');
+  XLSX.utils.book_append_sheet(wb, sheet(XLSX, payRows, [11, 18, 28, 28, 9, 11, 12, 12, 11, 11, 10]), '입금내역');
 
   const jobName = (id) => {
     const j = store.state.jobs.find((x) => x.id === id);

@@ -25,7 +25,9 @@ export const needsInvoice = (job) => job.status !== '취소' && job.taxInvoice?.
 
 export const jobPurchases = (jobId) => store.state.purchases.filter((p) => p.jobId === jobId);
 export const jobCost = (jobId) => jobPurchases(jobId).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-export const jobProfit = (job) => saleAmount(job) - jobCost(job.id);
+// 카드 수수료: 고객은 다 냈지만 카드사가 떼고 보낸 금액 (미수가 아닌 비용)
+export const feeSum = (job) => (job.payments || []).reduce((s, p) => s + (Number(p.fee) || 0), 0);
+export const jobProfit = (job) => saleAmount(job) - jobCost(job.id) - feeSum(job);
 
 /* ---------- 고객 ---------- */
 export const customerOf = (job) => store.state.customers.find((c) => c.id === job.customerId);

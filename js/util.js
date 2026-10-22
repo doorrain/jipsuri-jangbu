@@ -77,17 +77,29 @@ export function chosung(str) {
   }
   return out;
 }
+// 글자를 자모로 풀기: '문춘' → 'ㅁㅜㄴㅊㅜㄴ' (입력 중인 '문추'도 '문춘호'에 걸리도록)
+const JUNG = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ';
+const JONG = ['', 'ㄱ', 'ㄲ', 'ㄱㅅ', 'ㄴ', 'ㄴㅈ', 'ㄴㅎ', 'ㄷ', 'ㄹ', 'ㄹㄱ', 'ㄹㅁ', 'ㄹㅂ', 'ㄹㅅ', 'ㄹㅌ', 'ㄹㅍ', 'ㄹㅎ', 'ㅁ', 'ㅂ', 'ㅂㅅ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+function jamo(str) {
+  let out = '';
+  for (const ch of str) {
+    const c = ch.charCodeAt(0) - 0xac00;
+    out += c >= 0 && c <= 11171 ? CHO[Math.floor(c / 588)] + JUNG[Math.floor((c % 588) / 28)] + JONG[c % 28] : ch;
+  }
+  return out;
+}
 const norm = (s) => String(s || '').toLowerCase().replace(/[\s·\-_/()]/g, '');
 const isChoOnly = (s) => /^[ㄱ-ㅎ]+$/.test(s);
-// 검색어 단어가 모두 들어 있으면 true (초성 검색 지원)
+// 검색어 단어가 모두 들어 있으면 true — 이름 그대로, 입력 중인 글자, 초성(ㅁㅊㅎ) 모두 지원
 export function matches(hayRaw, query) {
   const words = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   const hay = norm(hayRaw);
   const hayCho = chosung(hay);
+  const hayJamo = jamo(hay);
   return words.every((w0) => {
     const w = norm(w0);
-    return !w || hay.includes(w) || (isChoOnly(w) && hayCho.includes(w));
+    return !w || hay.includes(w) || (isChoOnly(w) && hayCho.includes(w)) || hayJamo.includes(jamo(w));
   });
 }
 

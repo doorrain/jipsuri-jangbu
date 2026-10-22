@@ -754,8 +754,7 @@ function zipSheet(jobs, name) {
 }
 
 /* ================= ② 고객 ================= */
-function renderCustomers() {
-  const cs = store.state.customers.map((c) => ({ c, st: customerStats(c.id) }));
+function customerListHtml(cs) {
   const list = cs.filter(({ c }) => matches(`${c.name} ${c.region} ${c.phone} ${digits(c.phone)} ${c.address} ${c.memo}`, ui.cq));
   const sorters = {
     recent: (a, b) => (b.st.last || b.c.createdAt || '').localeCompare(a.st.last || a.c.createdAt || ''),
@@ -764,26 +763,32 @@ function renderCustomers() {
     name: (a, b) => (a.c.name || a.c.region || '').localeCompare(b.c.name || b.c.region || '', 'ko'),
   };
   list.sort(sorters[ui.csort] || sorters.recent);
-  view.innerHTML = `
-    <header class="hd"><div class="grow"><p class="eyebrow">${store.state.customers.length}명 · 단골 ${cs.filter((x) => x.st.count >= 2).length}명</p><h1>고객</h1></div>
-      <button class="btn sm line" id="c-new">${ic('plus')} 고객</button></header>
-    <label class="field" style="position:relative;margin-bottom:10px"><input id="cq" type="search" placeholder="이름, 동네, 전화번호, 주소 (초성 가능)" value="${esc(ui.cq)}" autocomplete="off" style="padding-left:42px" /><span style="position:absolute;left:13px;top:13px;color:var(--faint)">${ic('search')}</span></label>
-    ${chipRow('csort', [{ k: 'recent', label: '최근 작업순' }, { k: 'count', label: '단골순' }, { k: 'total', label: '매출순' }, { k: 'name', label: '이름순' }], ui.csort, 'scroll')}
-    <div class="list" style="margin-top:12px" id="c-list">
-      ${list.map(({ c, st }) => `<button class="li" data-go="#customer/${c.id}">
+  return list.map(({ c, st }) => `<button class="li" data-go="#customer/${c.id}">
         <div class="avatar">${initial(c)}</div>
         <div class="grow"><div class="t1">${esc(custName(c))} ${st.count >= 2 ? '<span class="badge-regular">단골</span>' : ''}${st.unpaid ? '<span class="pill red">미수</span>' : ''}</div>
         <div class="t2">${esc([fmtPhone(c.phone), st.last ? '최근 ' + md(st.last) : ''].filter(Boolean).join(' · ') || c.address || '')}</div></div>
-        <div class="amt">${st.count}회<small>${st.total ? won(st.total) : ''}</small></div></button>`).join('') || '<div class="empty">고객이 없습니다</div>'}
-    </div>`;
+        <div class="amt">${st.count}회<small>${st.total ? won(st.total) : ''}</small></div></button>`).join('')
+    || `<div class="empty">${ui.cq ? '찾는 고객이 없습니다' : '고객이 없습니다'}</div>`;
+}
+
+function renderCustomers() {
+  const cs = store.state.customers.map((c) => ({ c, st: customerStats(c.id) }));
+  // 검색창이 이미 있으면(입력 중) 목록만 새로 그림 — 한글 조합이 끊기지 않게
+  const cur = $('#cq');
+  if (cur && $('#c-list')) {
+    $('#c-list').innerHTML = customerListHtml(cs);
+    return;
+  }
+  view.innerHTML = `
+    <header class="hd"><div class="grow"><p class="eyebrow">${store.state.customers.length}명 · 단골 ${cs.filter((x) => x.st.count >= 2).length}명</p><h1>고객</h1></div>
+      <button class="btn sm line" id="c-new">${ic('plus')} 고객</button></header>
+    <label class="field" style="position:relative;margin-bottom:10px"><input id="cq" type="search" placeholder="이름, 동네, 전화번호 (초성도 가능: ㅁㅊㅎ)" value="${esc(ui.cq)}" autocomplete="off" style="padding-left:42px" /><span style="position:absolute;left:13px;top:13px;color:var(--faint)">${ic('search')}</span></label>
+    ${chipRow('csort', [{ k: 'recent', label: '최근 작업순' }, { k: 'count', label: '단골순' }, { k: 'total', label: '매출순' }, { k: 'name', label: '이름순' }], ui.csort, 'scroll')}
+    <div class="list" style="margin-top:12px" id="c-list">${customerListHtml(cs)}</div>`;
   const q = $('#cq');
   q.addEventListener('input', () => {
     ui.cq = q.value;
-    const pos = q.selectionStart;
-    renderCustomers();
-    const nq = $('#cq');
-    nq.focus();
-    nq.setSelectionRange(pos, pos);
+    $('#c-list').innerHTML = customerListHtml(store.state.customers.map((c) => ({ c, st: customerStats(c.id) })));
   });
   bindChips(view, 'csort', (v) => { ui.csort = v || 'recent'; saveUi(); render(); });
   $('#c-new').onclick = () => customerSheet();

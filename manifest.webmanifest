@@ -2,6 +2,7 @@
   "name": "하이집수리 현장장부",
   "short_name": "현장장부",
   "description": "일정·고객·매출·매입·현장 사진 관리",
+  "id": "/jipsuri-jangbu/",
   "start_url": "./#schedule",
   "scope": "./",
   "display": "standalone",

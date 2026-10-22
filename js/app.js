@@ -75,7 +75,7 @@ function bindChips(root, name, onChange, allowNone = false) {
 }
 const chipVal = (root, name) => $(`[data-chips="${name}"] .on`, root)?.dataset.v || '';
 const moneyField = (id, label, v) =>
-  `<label class="field"><span>${label}</span><div class="money-wrap"><input id="${id}" inputmode="numeric" autocomplete="off" value="${v ? num(v) : ''}" placeholder="0" /></div></label>`;
+  `<label class="field"><span>${label}</span><div class="money-wrap"><input id="${id}" class="money-in" inputmode="numeric" autocomplete="off" value="${v ? num(v) : ''}" placeholder="0" /><b class="unit">원</b></div></label>`;
 const statusPill = (s) => `<span class="pill ${STATUS_CLASS[s] || ''}">${esc(s)}</span>`;
 const vatShort = (k) => ({ incl: '부가세 포함', none: '부가세 없음', excl: '부가세 별도' }[k || 'none']);
 const amt = (n) => `${num(n)}<small>원</small>`;
@@ -361,19 +361,29 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
 
   // 고객 고르기 / 새 고객
   const nc = { name: '', region: '', phone: '' };
+  let editingCust = false; // 고른 고객의 이름·동네·번호를 이 화면에서 고치는 중
   function renderCust() {
     const box = $('#cust-box', s);
-    if (cust) {
+    if (cust && editingCust) {
+      box.innerHTML = `
+        <div class="field"><span>고객 정보 수정 <span class="faint" style="font-weight:500">— 저장하면 이 고객의 다른 작업에도 반영돼요</span></span>
+          <div class="grid2" style="margin-bottom:8px"><input id="ec-name" placeholder="이름" value="${esc(cust.name)}" autocomplete="off" /><input id="ec-region" placeholder="동네" value="${esc(cust.region)}" autocomplete="off" /></div>
+          <input id="ec-phone" type="tel" placeholder="전화번호" value="${esc(fmtPhone(cust.phone))}" autocomplete="off" />
+          <button type="button" class="btn sm ghost" id="ec-cancel" style="margin-top:8px">수정 취소</button>
+        </div>`;
+      $('#ec-cancel', box).onclick = () => { editingCust = false; renderCust(); };
+    } else if (cust) {
       const st = customerStats(cust.id);
       const hist = customerJobs(cust.id).filter((x) => x.id !== j.id).slice(0, 3);
       box.innerHTML = `
         <div class="field"><span>고객</span>
           <div class="picked"><div class="avatar">${initial(cust)}</div>
             <div class="grow"><div style="font-weight:700">${esc(custName(cust))} ${st.count >= 2 ? '<span class="badge-regular">단골</span>' : ''}</div>
-            <div class="small muted">${esc(fmtPhone(cust.phone) || '연락처 없음')} · 작업 ${st.count}회</div></div>
-            <button type="button" class="btn sm line" id="cust-change">변경</button></div>
+            <div class="small muted">${esc(fmtPhone(cust.phone) || '연락처 없음')} · 작업 ${st.count}회</div></div></div>
+          <div class="btns" style="margin-bottom:8px"><button type="button" class="btn sm line" id="cust-edit">${ic('edit')} 정보 수정</button><button type="button" class="btn sm line" id="cust-change">다른 고객으로 바꾸기</button></div>
           ${hist.length ? `<div class="mini-hist">${hist.map((h) => `<div>· ${md(h.date)} ${esc(h.work || '')} ${saleAmount(h) ? '· ' + won(saleAmount(h)) : ''}</div>`).join('')}</div>` : ''}
         </div>`;
+      $('#cust-edit', box).onclick = () => { editingCust = true; renderCust(); };
       $('#cust-change', box).onclick = () => { cust = null; j.customerId = ''; renderCust(); };
     } else {
       box.innerHTML = `
@@ -411,6 +421,7 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     $$('[data-cid]', box).forEach((b) => (b.onclick = () => pickCustomer(b.dataset.cid)));
   }
   function pickCustomer(cid) {
+    editingCust = false;
     cust = store.state.customers.find((c) => c.id === cid);
     j.customerId = cid;
     if (!$('#jf-addr', s).value && cust.address) $('#jf-addr', s).value = cust.address;
@@ -481,6 +492,12 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
   }
 
   $('#jf-save', s).onclick = async () => {
+    if (cust && editingCust) {
+      const name = $('#ec-name', s).value.trim(), region = $('#ec-region', s).value.trim(), phone = fmtPhone($('#ec-phone', s).value);
+      if (!name && !phone && !region) { toast('고객 이름이나 전화번호를 넣어 주세요'); return; }
+      cust = { ...cust, name, region, phone };
+      await save('customers', cust);
+    }
     if (!cust) {
       const name = nc.name.trim(), phone = fmtPhone(nc.phone), region = nc.region.trim();
       if (!name && !phone && !region) { toast('고객 이름이나 전화번호를 넣어 주세요'); $('#nc-name', s)?.focus(); return; }
@@ -792,19 +809,57 @@ function reviewSheet(j) {
     ${sheetHead('고객 후기')}
     <div class="field"><span>별점</span><div class="star-pick" id="rv-stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-n="${n}" class="${n <= rating ? 'on' : ''}">★</button>`).join('')}</div></div>
     <div class="field"><span>후기 남긴 곳</span>${chipRow('where', REVIEW_WHERE, rv.where)}</div>
-    <label class="field"><span>후기 내용</span><textarea id="rv-text" placeholder="고객이 남긴 후기를 붙여넣거나 요약하세요">${esc(rv.text || '')}</textarea></label>
+    <label class="field"><span>후기 내용</span><textarea id="rv-text" placeholder="고객이 남긴 후기를 복사해서 붙여넣으세요">${esc(rv.text || '')}</textarea></label>
+    <div style="margin:-6px 0 14px">
+      <button type="button" class="btn sm ghost" id="rv-img">${ic('camera')} 복사가 안 되면: 캡처로 채우기</button>
+      <input type="file" id="rv-file" accept="image/*" hidden />
+      <div class="small muted" id="rv-msg" style="margin-top:6px"></div>
+    </div>
     <label class="check"><input type="checkbox" id="rv-req" ${rv.requested ? 'checked' : ''} /> 후기 요청 보냄</label>
     <div class="foot"><button class="btn block" id="rv-save">저장</button></div>`);
   bindChips(s, 'where', null, true);
+  // 복사가 막힌 후기: 캡처에서 글자를 읽어 넣고, 캡처는 '후기' 사진으로 보관
+  let capture = null;
+  $('#rv-img', s).onclick = () => $('#rv-file', s).click();
+  $('#rv-file', s).onchange = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const msg = $('#rv-msg', s);
+    $('#rv-img', s).disabled = true;
+    try {
+      const text = await readImageText(f, (m) => (msg.textContent = m));
+      const ta = $('#rv-text', s);
+      ta.value = (ta.value.trim() ? ta.value.trim() + '\n\n' : '') + text;
+      capture = f;
+      msg.textContent = '캡처에서 읽은 글자를 넣었어요. 필요 없는 줄은 지우고 틀린 글자는 고쳐 주세요. 캡처 원본도 함께 저장돼요';
+    } catch (err) {
+      console.error(err);
+      msg.textContent = '캡처를 읽지 못했어요. 인터넷 연결을 확인하거나 직접 입력해 주세요';
+    } finally {
+      $('#rv-img', s).disabled = false;
+    }
+  };
   $('#rv-stars', s).addEventListener('click', (e) => {
     const b = e.target.closest('[data-n]');
     if (!b) return;
     rating = Number(b.dataset.n) === rating ? 0 : Number(b.dataset.n);
     $$('#rv-stars button', s).forEach((x) => x.classList.toggle('on', Number(x.dataset.n) <= rating));
   });
-  $('#rv-save', s).onclick = () => {
-    save('jobs', { ...j, review: { rating, where: chipVal(s, 'where'), text: $('#rv-text', s).value.trim(), requested: $('#rv-req', s).checked } });
+  $('#rv-save', s).onclick = async () => {
+    const review = { rating, where: chipVal(s, 'where'), text: $('#rv-text', s).value.trim(), requested: $('#rv-req', s).checked };
+    await save('jobs', { ...j, review });
     closeSheet();
+    if (!capture) return;
+    try {
+      const added = await uploadPhotos(j.id, [capture], '후기');
+      const fresh = store.state.jobs.find((x) => x.id === j.id) || j;
+      await save('jobs', { ...fresh, photos: [...(fresh.photos || []), ...added] });
+      toast('후기와 캡처를 저장했어요');
+    } catch (e) {
+      console.error(e);
+      toast('후기 글은 저장했지만 캡처 사진은 올리지 못했어요');
+    }
   };
 }
 

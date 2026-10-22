@@ -53,10 +53,9 @@ export async function readImageText(file, onStatus) {
   const canvas = await prepare(file);
   onStatus && onStatus('글자 읽는 중…');
   const { data } = await worker.recognize(canvas);
-  // 한글 글자 사이에 끼어든 띄어쓰기 정리 ("이 연 지" → "이연지")
   return data.text
     .split('\n')
-    .map((l) => l.replace(/(?<=[가-힣]) (?=[가-힣](?:[ \n]|$))/g, '').trim())
+    .map((l) => l.trim())
     .filter(Boolean)
     .join('\n');
 }

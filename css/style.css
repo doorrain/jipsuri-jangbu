@@ -139,9 +139,17 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 }
 .field textarea { height: auto; min-height: 84px; padding: 12px 14px; resize: vertical; line-height: 1.5; }
 .field input:focus, .field select:focus, .field textarea:focus, .input:focus { border-color: var(--ink); }
-.field .money-wrap { position: relative; }
-.field .money-wrap input { padding-right: 36px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
-.field .money-wrap::after { content: '원'; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 15px; }
+/* 금액 칸: 숫자는 오른쪽 정렬, '원'은 칸 안 오른쪽 끝에 따로 고정 (겹치지 않음) */
+.field .money-wrap {
+  display: flex; align-items: center; height: 48px; padding: 0 14px; gap: 6px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card);
+}
+.field .money-wrap:focus-within { border-color: var(--ink); }
+.field .money-wrap input.money-in {
+  flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; outline: none;
+  text-align: right; font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums;
+}
+.field .money-wrap .unit { flex: none; color: var(--muted); font-size: 15px; font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 15px; font-weight: 600; cursor: pointer; }
 .check input { width: 22px; height: 22px; accent-color: var(--ink); }

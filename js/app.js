@@ -924,6 +924,7 @@ function purchaseSheet(p, jobId) {
   const tiState = !x.taxInvoice?.need ? 'none' : x.taxInvoice.received ? 'received' : 'need';
   const s = openSheet(`
     ${sheetHead(isNew ? '매입 기록' : '매입 수정')}
+    <label class="field"><span>연결 현장</span><select id="bu-job"><option value="">공통 매입 (현장 없음)</option>${recentJobs.map((j) => `<option value="${j.id}" ${j.id === x.jobId ? 'selected' : ''}>${md(j.date)} ${esc(custName(customerOf(j)))} ${esc((j.work || '').slice(0, 14))}</option>`).join('')}</select></label>
     ${moneyField('bu-amt', '금액', x.amount)}
     <div class="field"><span>분류</span>${chipRow('cat', BUY_CATS, x.category)}</div>
     <div id="labor-box" hidden class="card" style="background:var(--card)">
@@ -943,7 +944,6 @@ function purchaseSheet(p, jobId) {
     <div class="field"><span>결제방식</span>${chipRow('method', BUY_METHODS, x.method)}</div>
     <div class="field"><span>결제자</span>${chipRow('payer', PAYERS, x.payer)}</div>
     <div class="field"><span>세금계산서</span>${chipRow('ti', [{ k: 'none', label: '해당없음' }, { k: 'need', label: '받아야 함' }, { k: 'received', label: '받음' }], tiState)}</div>
-    <label class="field"><span>연결 현장</span><select id="bu-job"><option value="">공통 매입 (현장 없음)</option>${recentJobs.map((j) => `<option value="${j.id}" ${j.id === x.jobId ? 'selected' : ''}>${md(j.date)} ${esc(custName(customerOf(j)))} ${esc((j.work || '').slice(0, 14))}</option>`).join('')}</select></label>
     <label class="field"><span>메모</span><input id="bu-memo" value="${esc(x.memo)}" autocomplete="off" /></label>
     <div class="foot btns">${isNew ? '' : '<button class="btn danger" id="bu-del" style="flex:0 0 96px">삭제</button>'}<button class="btn" id="bu-save">저장</button></div>`);
   moneyInput($('#bu-amt', s));
@@ -986,7 +986,7 @@ function purchaseSheet(p, jobId) {
   };
   bindChips(s, 'cat', onCat, true);
   onCat();
-  if (isNew) setTimeout(() => $('#bu-amt', s).focus(), 50);
+  if (isNew) setTimeout(() => $('#bu-amt', s).focus({ preventScroll: true }), 50);
 
   $('#bu-save', s).onclick = async () => {
     const amount = parseNum($('#bu-amt', s).value);
@@ -1066,7 +1066,6 @@ function renderReport() {
       <div class="kv"><span class="muted">매입 (현장 / 공통)</span><span class="v">${num(r.siteBuy)} / ${num(r.commonBuy)}</span></div>
       <div class="kv"><span class="muted">미수금</span><span class="v" style="${r.receivableTotal ? 'color:var(--red)' : ''}">${won(r.receivableTotal)}</span></div>
     </div>
-    <div class="btns" style="margin-bottom:12px"><button class="btn accent" id="r-xlsx">${ic('down')} 엑셀 다운로드</button><button class="btn line" id="r-zip">${ic('camera')} 기간 사진</button></div>
     ${r.months.length > 1 ? `<div class="card"><h3>월별 추이</h3><div class="bars">${r.months.map((m) => `<div class="col"><div class="pair"><i style="height:${(m.sales / maxM) * 100}%"></i><i class="b" style="height:${(m.buys / maxM) * 100}%"></i></div><span class="lb">${Number(m.key.slice(5))}월</span></div>`).join('')}</div><div class="legend"><span><i></i>매출</span><span><i class="b"></i>매입</span></div></div>` : ''}
     <div class="card"><h3>결제수단별 입금</h3>${hbars(r.byMethod)}</div>
     <div class="card"><h3>부가세 구분별 매출</h3>${hbars(r.byVat)}</div>
@@ -1075,6 +1074,8 @@ function renderReport() {
     ${r.receivables.length ? `<div class="sec-title">미수금<span class="r">${r.receivables.length}건</span></div><div class="list">${r.receivables.map(jobLi).join('')}</div>` : ''}
     ${r.invoicePending.length ? `<div class="sec-title">세금계산서 미발행<span class="r">${r.invoicePending.length}건</span></div><div class="list">${r.invoicePending.map(jobLi).join('')}</div>` : ''}
     ${r.buyInvoiceMissing.length ? `<div class="sec-title">매입 세금계산서 미수취<span class="r">${r.buyInvoiceMissing.length}건</span></div><div class="list">${r.buyInvoiceMissing.map((p) => `<div class="li"><div class="grow"><div class="t1">${esc(p.item || '')}</div><div class="t2">${md(p.date)} · ${esc(p.vendor || '')}</div></div><div class="amt">${won(p.amount)}</div></div>`).join('')}</div>` : ''}
+    <div class="sec-title">내려받기<span class="r">${r.from} ~ ${r.to}</span></div>
+    <div class="btns" style="margin-bottom:12px"><button class="btn accent" id="r-xlsx">${ic('down')} 엑셀 다운로드</button><button class="btn line" id="r-zip">${ic('camera')} 사진 다운로드</button></div>
   `;
   bindChips(view, 'rp', (v) => {
     ui.rp = v || 'month';

@@ -13,7 +13,8 @@ export const VAT_MODES = [
 ];
 export const PHOTO_STAGES = ['문의', '작업 전', '작업 중', '작업 후', '후기', '기타'];
 export const LABOR_TYPES = ['일용직', '외주(3.3%)', '기타'];
-export const PAYERS = ['남편', '아내'];
+export const PAYERS = ['LEE', 'BEE']; // LEE = 남편, BEE = 아내
+export const OLD_PAYER = { 남편: 'LEE', 아내: 'BEE' }; // 예전 이름 → 새 이름
 export const REVIEW_WHERE = ['네이버', '당근', '문자', '기타'];
 
 export const DEFAULT_SETTINGS = {

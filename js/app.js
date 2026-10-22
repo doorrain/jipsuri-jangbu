@@ -4,7 +4,7 @@ import {
   monthStart, monthEnd, addMonths, digits, fmtPhone, matches, download,
 } from './util.js';
 import {
-  SOURCES, STATUSES, STATUS_CLASS, PAY_METHODS, BUY_METHODS, BUY_CATS, VAT_MODES, PHOTO_STAGES, LABOR_TYPES, PAYERS, REVIEW_WHERE,
+  SOURCES, STATUSES, STATUS_CLASS, PAY_METHODS, BUY_METHODS, BUY_CATS, VAT_MODES, PHOTO_STAGES, LABOR_TYPES, PAYERS, OLD_PAYER, REVIEW_WHERE,
 } from './seed.js';
 import {
   saleAmount, finalAmount, vatExtra, billed, paidSum, unpaid, payState, isReceivable, needsInvoice, jobPurchases, jobCost, jobProfit, feeSum,
@@ -32,7 +32,26 @@ const ui = Object.assign(
   })(),
 );
 const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ cal: ui.cal, csort: ui.csort })); } catch (_) {} };
-const me = () => { try { return localStorage.getItem(ME_KEY) || ''; } catch (_) { return ''; } };
+const me = () => {
+  try {
+    const v = localStorage.getItem(ME_KEY) || '';
+    return OLD_PAYER[v] || v;
+  } catch (_) { return ''; }
+};
+
+// 결제자 이름 변경(남편→LEE, 아내→BEE): 예전 기록을 한 번 바꿔 저장
+let payerMigrating = false;
+async function migratePayers() {
+  if (payerMigrating || !store.ready || (store.mode === 'cloud' && !(store.user && store.online))) return;
+  const old = store.state.purchases.filter((p) => OLD_PAYER[p.payer]);
+  if (!old.length) return;
+  payerMigrating = true;
+  try {
+    for (const p of old) await save('purchases', { ...p, payer: OLD_PAYER[p.payer] });
+  } finally {
+    payerMigrating = false;
+  }
+}
 
 /* ================= 공통 도구 ================= */
 let toastTimer;
@@ -125,6 +144,7 @@ function doRender() {
 subscribe(() => {
   // 입력 중인 시트는 그대로 두고 뒤 화면만 새로
   render();
+  migratePayers();
 });
 
 function syncBadge() {
@@ -174,7 +194,7 @@ function jobCard(j, showDate = false) {
     <div class="b">
       <div class="n"><span class="nm">${esc(custName(c))}</span>${st.count >= 2 ? '<span class="badge-regular">단골</span>' : ''}${statusPill(j.status)}</div>
       ${j.address ? `<div class="a">${esc(j.address)}</div>` : ''}
-      ${j.work ? `<div class="w">${esc(j.work)}</div>` : ''}
+      ${j.work || j.worker ? `<div class="w">${esc(j.work || '')}${j.worker ? `<span class="muted">${j.work ? ' · ' : ''}${esc(j.worker)}</span>` : ''}</div>` : ''}
       ${money}
     </div>
   </button>`;
@@ -183,9 +203,13 @@ function jobCard(j, showDate = false) {
 function renderSchedule() {
   const t = today();
   const sel = ui.sel;
-  const mFrom = monthStart(t), mTo = monthEnd(t);
+  // 위 요약은 달력에서 보고 있는(선택한) 날짜의 달 기준
+  const mFrom = monthStart(sel), mTo = monthEnd(sel);
+  const selMonth = toDate(sel).getMonth() + 1;
   const jobsAll = activeJobs();
-  const monthSales = jobsAll.filter((j) => inRange(j.date, mFrom, mTo)).reduce((s, j) => s + saleAmount(j), 0);
+  const monthJobs = jobsAll.filter((j) => inRange(j.date, mFrom, mTo));
+  const monthDone = monthJobs.filter((j) => ['작업완료', '정산완료'].includes(j.status)).length;
+  const monthSales = monthJobs.reduce((s, j) => s + saleAmount(j), 0);
   const monthBuy = store.state.purchases.filter((p) => inRange(p.date, mFrom, mTo)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const recv = jobsAll.filter(isReceivable);
   const inv = jobsAll.filter(needsInvoice);
@@ -227,13 +251,14 @@ function renderSchedule() {
     </header>
     <section class="kpis">
       <div class="kpi dark"><div class="l">오늘 일정</div><div class="v">${todayN}<small>건</small></div></div>
-      <div class="kpi"><div class="l">${d.getMonth() + 1}월 매출</div><div class="v">${short(monthSales)}</div></div>
-      <div class="kpi"><div class="l">${d.getMonth() + 1}월 매입</div><div class="v">${short(monthBuy)}</div></div>
+      <button class="kpi" data-ledger="sales" style="text-align:left"><div class="l">${selMonth}월 매출</div><div class="v">${short(monthSales)}</div></button>
+      <button class="kpi" data-ledger="buys" style="text-align:left"><div class="l">${selMonth}월 매입</div><div class="v">${short(monthBuy)}</div></button>
     </section>
     <div class="alerts">
       ${recv.length ? `<button class="alert red" data-alert="recv">미수 ${recv.length}건 · ${num(recv.reduce((s, j) => s + unpaid(j), 0))}원</button>` : ''}
       ${inv.length ? `<button class="alert orange" data-alert="inv">계산서 미발행 ${inv.length}건</button>` : ''}
       ${revisit.length ? `<button class="alert blue" data-alert="revisit">재방문 ${revisit.length}건</button>` : ''}
+      <button class="alert gray" data-alert="month">${selMonth}월 작업 ${monthJobs.length}건${monthJobs.length ? ` · 완료 ${monthDone}` : ''}</button>
       ${undated.length ? `<button class="alert gray" data-alert="undated">날짜 미정 문의 ${undated.length}건</button>` : ''}
     </div>
     <div class="cal-head">
@@ -249,6 +274,8 @@ function renderSchedule() {
     ${undated.length ? `<div class="sec-title">날짜 미정 문의<span class="r">${undated.length}건</span></div>${undated.map((j) => jobCard(j, true)).join('')}` : ''}
   `;
   $$('[data-day]').forEach((b) => (b.onclick = () => { ui.sel = b.dataset.day; render(); }));
+  // 매출·매입 요약을 누르면 그 달 장부로
+  $$('[data-ledger]').forEach((b) => (b.onclick = () => { ui.lt = b.dataset.ledger; ui.lm = sel; go('#ledger'); }));
   $$('[data-calmode]').forEach((b) => (b.onclick = () => { ui.cal = b.dataset.calmode; saveUi(); render(); }));
   $$('[data-cal-move]').forEach((b) => (b.onclick = () => {
     const k = Number(b.dataset.calMove);
@@ -262,6 +289,7 @@ function renderSchedule() {
       inv: ['세금계산서 미발행', inv],
       revisit: ['재방문 필요', revisit],
       undated: ['날짜 미정 문의', undated],
+      month: [`${selMonth}월 작업`, monthJobs],
     };
     jobListSheet(map[k][0], map[k][1]);
   }));
@@ -290,7 +318,8 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     j.address = cust.address || '';
     j.source = '';
   }
-  const tags = store.state.settings.workTags || [];
+  // 작업자 버튼: LEE + 인건비에 등록한 사람 + 예전에 적은 이름 (BEE는 현장 작업자가 아니라 기본 목록에서 뺌)
+  const workerNames = [...new Set(['LEE', ...(store.state.settings.workers || []).map((w) => w.name), ...store.state.jobs.map((x) => x.worker)].filter(Boolean))];
 
   const s = openSheet(`
     ${sheetHead(isNew ? '새 일정' : '일정 수정')}
@@ -315,7 +344,10 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     <div class="field"><span>유입경로</span>${chipRow('source', SOURCES, j.source)}</div>
     <label class="field"><span>현장 주소</span><input id="jf-addr" value="${esc(j.address)}" placeholder="예) 별내 리슈빌 2113동 102호" autocomplete="off" /></label>
     <label class="field"><span>작업내역</span><textarea id="jf-work" placeholder="예) 세면대 교체, 도어클로저 교체">${esc(j.work)}</textarea></label>
-    <div class="chips" id="tag-chips" style="margin:-6px 0 16px">${tags.map((t) => `<button type="button" class="chip sm" data-tag="${esc(t)}">+ ${esc(t)}</button>`).join('')}</div>
+    <div class="field"><span>작업자 <span class="faint" style="font-weight:500">— 함께 간 사람 모두 눌러 주세요 (여러 명 가능)</span></span>
+      <div class="chips" id="wk-chips" style="margin-bottom:8px"></div>
+      <div class="row"><input id="wk-new" class="input grow" placeholder="다른 사람 이름" autocomplete="off" /><button type="button" class="btn sm line" id="wk-add" style="height:48px">${ic('plus')} 추가</button></div>
+    </div>
     <div class="grid2" style="align-items:end">${moneyField('jf-amt', '견적 금액 (나중에 입력해도 돼요)', j.amount)}<div class="field">${chipRow('vat', VAT_MODES, j.vat || 'none')}</div></div>
     <div class="small" id="jf-dc-msg" hidden style="margin:-8px 0 14px;color:var(--accent);font-weight:600"></div>
     ${isNew ? '' : `<div class="field"><span>상태</span>${chipRow('status', STATUSES, j.status)}</div>`}
@@ -349,15 +381,36 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
 
   const dateInput = $('#jf-date', s);
   const syncDateChips = () => $$('#date-chips .chip', s).forEach((b) => b.classList.toggle('on', b.dataset.d === dateInput.value));
+  // 작업자: 여러 명 고르기 (칩을 누르면 선택/해제, 새 이름은 추가)
+  const splitWorkers = (v) => String(v || '').split(/[,·/]+/).map((x) => x.trim()).filter(Boolean);
+  const picked = new Set(splitWorkers(j.worker));
+  // 예전에 BEE를 적은 작업이 있어도 버튼 목록에는 띄우지 않음 (그 작업에 이미 선택돼 있으면 표시)
+  const wkOptions = [...new Set([...workerNames.flatMap(splitWorkers).filter((w) => w !== 'BEE'), ...picked])];
+  const drawWorkers = () => {
+    $('#wk-chips', s).innerHTML = wkOptions.map((w) => `<button type="button" class="chip ${picked.has(w) ? 'on' : ''}" data-wk="${esc(w)}">${picked.has(w) ? '✓ ' : ''}${esc(w)}</button>`).join('');
+  };
+  $('#wk-chips', s).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-wk]');
+    if (!b) return;
+    const w = b.dataset.wk;
+    picked.has(w) ? picked.delete(w) : picked.add(w);
+    drawWorkers();
+  });
+  const addWorker = () => {
+    const inp = $('#wk-new', s);
+    splitWorkers(inp.value).forEach((w) => {
+      if (!wkOptions.includes(w)) wkOptions.push(w);
+      picked.add(w);
+    });
+    inp.value = '';
+    drawWorkers();
+  };
+  $('#wk-add', s).onclick = addWorker;
+  $('#wk-new', s).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addWorker(); } });
+  drawWorkers();
   $$('#date-chips .chip', s).forEach((b) => (b.onclick = () => { dateInput.value = b.dataset.d; syncDateChips(); }));
   dateInput.addEventListener('input', syncDateChips);
   syncDateChips();
-  $('#tag-chips', s).addEventListener('click', (e) => {
-    const b = e.target.closest('[data-tag]');
-    if (!b) return;
-    const w = $('#jf-work', s);
-    w.value = w.value.trim() ? w.value.trim().replace(/[,\s]*$/, '') + ', ' + b.dataset.tag : b.dataset.tag;
-  });
 
   // 고객 고르기 / 새 고객
   const nc = { name: '', region: '', phone: '' };
@@ -510,6 +563,8 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     j.source = chipVal(s, 'source');
     j.address = $('#jf-addr', s).value.trim();
     j.work = $('#jf-work', s).value.trim();
+    if ($('#wk-new', s).value.trim()) addWorker(); // 이름만 적고 추가를 안 눌렀어도 포함
+    j.worker = wkOptions.filter((w) => picked.has(w)).join(', ');
     j.amount = parseNum($('#jf-amt', s).value);
     j.vat = chipVal(s, 'vat') || 'none';
     j.note = $('#jf-note', s).value.trim();
@@ -576,6 +631,7 @@ function renderJob(id) {
       ${c?.phone ? `<div class="info-row">${ic('phone')}<div class="grow">${esc(fmtPhone(c.phone))}</div><div class="acts"><a class="btn sm ghost" href="tel:${digits(c.phone)}">전화</a><a class="btn sm ghost" href="sms:${digits(c.phone)}">문자</a></div></div>` : ''}
       ${j.source ? `<div class="info-row">${ic('source')}<div class="grow">유입경로 · ${esc(j.source)}</div></div>` : ''}
       ${j.work ? `<div class="info-row">${ic('tool')}<div class="grow note">${esc(j.work)}</div></div>` : ''}
+      ${j.worker ? `<div class="info-row">${ic('users')}<div class="grow">작업자 · ${esc(j.worker)}</div></div>` : ''}
     </div>
 
     <div class="card">
@@ -1085,17 +1141,16 @@ function renderLedger() {
       }).join('') || '<div class="empty">이 달 매출이 없습니다</div>'}</div>`;
   } else {
     const all = store.state.purchases.filter((p) => inRange(p.date, from, to));
-    const filt = { 전체: () => true, 현장: (p) => p.jobId, 공통: (p) => !p.jobId, '계산서 미수취': (p) => p.taxInvoice?.need && !p.taxInvoice?.received, 인건비: (p) => p.category === '인건비', 남편: (p) => p.payer === '남편', 아내: (p) => p.payer === '아내' }[ui.bf] || (() => true);
+    const filt = { 전체: () => true, 현장: (p) => p.jobId, 공통: (p) => !p.jobId, '계산서 미수취': (p) => p.taxInvoice?.need && !p.taxInvoice?.received, 인건비: (p) => p.category === '인건비', ...Object.fromEntries(PAYERS.map((w) => [w, (p) => p.payer === w])) }[ui.bf] || (() => true);
     const list = all.filter(filt).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     const total = all.reduce((s, p) => s + (Number(p.amount) || 0), 0);
     const by = (w) => all.filter((p) => p.payer === w).reduce((s, p) => s + (Number(p.amount) || 0), 0);
     body = `
       <section class="kpis">
         <div class="kpi dark"><div class="l">매입</div><div class="v">${short(total)}</div></div>
-        <div class="kpi"><div class="l">남편 결제</div><div class="v">${short(by('남편'))}</div></div>
-        <div class="kpi"><div class="l">아내 결제</div><div class="v">${short(by('아내'))}</div></div>
+        ${PAYERS.map((w) => `<div class="kpi"><div class="l">${w} 결제</div><div class="v">${short(by(w))}</div></div>`).join('')}
       </section>
-      ${chipRow('bf', ['전체', '현장', '공통', '계산서 미수취', '인건비', '남편', '아내'], ui.bf, 'scroll')}
+      ${chipRow('bf', ['전체', '현장', '공통', '계산서 미수취', '인건비', ...PAYERS], ui.bf, 'scroll')}
       <button class="btn block line" id="b-new" style="margin-top:12px">${ic('plus')} 매입 기록</button>
       <div class="list" style="margin-top:10px">${list.map((p) => {
         const j = p.jobId && store.state.jobs.find((x) => x.id === p.jobId);
@@ -1318,8 +1373,6 @@ function renderSettings() {
       <div class="gauge ${pct > 80 ? 'warn' : ''}"><i style="width:${pct}%"></i></div>
       <div class="row small"><span class="grow">${(used / 1024 / 1024).toFixed(1)}MB 사용 / ${set.photoQuotaMB || 1024}MB</span><b>${pct.toFixed(1)}%</b></div>
       ${pct > 80 ? '<p class="small" style="color:var(--red)">공간이 거의 찼어요. 오래된 현장 사진을 내려받아 보관한 뒤 정리해 주세요.</p>' : '<p class="muted small">무료 저장공간(1GB)에는 사진 약 3,000장이 들어가요.</p>'}</div>
-    <div class="card"><h3>자주 쓰는 작업</h3><p class="muted small" style="margin:-6px 0 8px">일정 등록 화면의 버튼이 돼요. 한 줄에 하나씩.</p>
-      <textarea class="input" id="s-tags" style="height:140px;padding:12px">${esc((set.workTags || []).join('\n'))}</textarea></div>
     <div class="card"><h3>구매처</h3><textarea class="input" id="s-vendors" style="height:110px;padding:12px">${esc((set.vendors || []).join('\n'))}</textarea></div>
     <div class="card"><h3>입금 은행</h3><textarea class="input" id="s-banks" style="height:110px;padding:12px">${esc((set.banks || []).join('\n'))}</textarea></div>
     <button class="btn block" id="s-save" style="margin-bottom:12px">목록 저장</button>
@@ -1335,7 +1388,7 @@ function renderSettings() {
   bindChips(view, 'me', (v) => { try { localStorage.setItem(ME_KEY, v); } catch (_) {} toast(v ? `이 휴대폰은 '${v}'로 기록돼요` : '선택 해제'); }, true);
   const lines = (id) => $(id).value.split('\n').map((x) => x.trim()).filter(Boolean);
   $('#s-save').onclick = async () => {
-    await saveSettings({ ...set, workTags: lines('#s-tags'), vendors: lines('#s-vendors'), banks: lines('#s-banks') });
+    await saveSettings({ ...set, vendors: lines('#s-vendors'), banks: lines('#s-banks') });
     toast('저장했어요');
   };
   $('#s-backup').onclick = () => {

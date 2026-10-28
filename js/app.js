@@ -104,6 +104,8 @@ const short = (n) => {
   if (Math.abs(n) >= 10000) return `${num(Math.round(n / 1000) / 10)}<small>만</small>`;
   return `${num(n)}<small>원</small>`;
 };
+// 비율 표시: 23.4%
+const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(1).replace(/\.0$/, '')}%` : '–');
 const initial = (c) => esc((c?.name || c?.region || '?').trim().slice(0, 1));
 
 function go(hash) {
@@ -1315,9 +1317,19 @@ function renderReport() {
     <div class="grid2" style="margin:10px 0 14px" ${ui.rp === 'custom' ? '' : 'hidden'}><input type="date" class="input" id="r-from" value="${ui.rfrom}" /><input type="date" class="input" id="r-to" value="${ui.rto}" /></div>
     <section class="kpis" style="margin-top:12px">
       <div class="kpi dark"><div class="l">매출</div><div class="v">${short(r.salesTotal)}</div></div>
-      <div class="kpi"><div class="l">매입</div><div class="v">${short(r.buyTotal)}</div></div>
-      <div class="kpi"><div class="l">차익</div><div class="v">${short(r.profit)}</div></div>
+      <div class="kpi"><div class="l">매입</div><div class="v">${short(r.buyTotal)}</div>${r.salesTotal ? `<div class="small muted">매출의 ${pct(r.buyTotal, r.salesTotal)}</div>` : ''}</div>
+      <div class="kpi"><div class="l">차익</div><div class="v">${short(r.profit)}</div>${r.salesTotal ? `<div class="small muted">매출의 ${pct(r.profit, r.salesTotal)}</div>` : ''}</div>
     </section>
+    ${r.salesTotal ? `<div class="card">
+      <h3>매출 대비 매입 <span class="r" style="font-size:20px;font-weight:800;color:var(--ink)">${pct(r.buyTotal, r.salesTotal)}</span></h3>
+      <div class="ratio">
+        <i style="width:${Math.min(100, (r.buyTotal / r.salesTotal) * 100)}%;background:var(--accent)"></i>
+        <i style="width:${Math.min(100, (r.feeTotal / r.salesTotal) * 100)}%;background:var(--faint)"></i>
+        <i style="flex:1;background:var(--ink)"></i>
+      </div>
+      <div class="legend"><span><i class="b"></i>매입 ${pct(r.buyTotal, r.salesTotal)}</span>${r.feeTotal ? `<span><i style="background:var(--faint)"></i>카드 수수료 ${pct(r.feeTotal, r.salesTotal)}</span>` : ''}<span><i></i>차익 ${pct(r.profit, r.salesTotal)}</span></div>
+      ${r.months.length > 1 ? `<hr class="sep" />${r.months.filter((m) => m.sales || m.buys).map((m) => `<div class="kv"><span class="muted">${Number(m.key.slice(5))}월 <span class="faint small">매출 ${num(m.sales)} · 매입 ${num(m.buys)}</span></span><span class="v">${m.sales ? pct(m.buys, m.sales) : '–'}</span></div>`).join('')}` : ''}
+    </div>` : ''}
     <div class="card">
       <div class="kv"><span class="muted">작업 건수</span><span class="v">${r.jobCount}건</span></div>
       <div class="kv"><span class="muted">입금 합계</span><span class="v">${won(r.paidTotal)}</span></div>

@@ -83,6 +83,8 @@ export async function exportExcel(r) {
     ['매입 합계', r.buyTotal, `현장 ${r.siteBuy.toLocaleString()} / 공통 ${r.commonBuy.toLocaleString()}`],
     ['카드 수수료', r.feeTotal, '카드 결제 금액 - 실제 입금액'],
     ['차익 (매출 - 매입 - 카드 수수료)', r.profit, ''],
+    ['매출 대비 매입 (%)', r.salesTotal ? Math.round((r.buyTotal / r.salesTotal) * 1000) / 10 : '', '매입 ÷ 매출 × 100'],
+    ['매출 대비 차익 (%)', r.salesTotal ? Math.round((r.profit / r.salesTotal) * 1000) / 10 : '', '차익 ÷ 매출 × 100'],
     ['미수금', r.receivableTotal, `${r.receivables.length}건`],
     ['세금계산서 미발행(매출)', r.invoicePending.length, '건'],
     ['세금계산서 미수취(매입)', r.buyInvoiceMissing.length, '건'],
@@ -102,8 +104,8 @@ export async function exportExcel(r) {
     ['유입경로별', '매출(원)', '건수'],
     ...r.bySource.map((s) => [s.label, s.amount, s.n]),
     [],
-    ['월', '매출(원)', '매입(원)', '차익(원)'],
-    ...r.months.map((m) => [m.key, m.sales, m.buys, m.sales - m.buys]),
+    ['월', '매출(원)', '매입(원)', '차익(원)', '매출 대비 매입(%)'],
+    ...r.months.map((m) => [m.key, m.sales, m.buys, m.sales - m.buys, m.sales ? Math.round((m.buys / m.sales) * 1000) / 10 : '']),
   ];
   XLSX.utils.book_append_sheet(wb, sheet(XLSX, summary, [26, 16, 28, 14]), '요약');
 

@@ -294,6 +294,8 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 8px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--ink); margin-right: 5px; vertical-align: -1px; }
 .legend i.b { background: var(--accent); }
+.ratio { display: flex; height: 14px; border-radius: 99px; overflow: hidden; background: var(--gray-soft); margin: 4px 0 2px; }
+.ratio i { display: block; height: 100%; }
 .hbar { display: grid; grid-template-columns: 84px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; font-size: 14px; }
 .hbar .tr { height: 8px; background: var(--gray-soft); border-radius: 99px; overflow: hidden; }
 .hbar .tr i { display: block; height: 100%; background: var(--ink-2); border-radius: 99px; }

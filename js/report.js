@@ -110,17 +110,17 @@ export async function exportExcel(r) {
   XLSX.utils.book_append_sheet(wb, sheet(XLSX, summary, [26, 16, 28, 14]), '요약');
 
   const jobsRows = [
-    ['작업일', '시간', '고객', '연락처', '현장 주소', '유입경로', '작업내역', '작업자', '상태', '견적금액', '할인', '추가', '할인·추가 내용', '최종 금액', '부가세', '받을 금액', '입금액', '미수금', '입금상태', '세금계산서', '발행일', '현장 매입', '현장 순이익', '후기', '특이사항'],
+    ['작업일', '시간', '고객', '연락처', '현장 주소', '유입경로', '작업내역', '작업자', '상태', '견적금액', '할인', '추가', '할인·추가 내용', '최종 금액', '부가세', '받을 금액', '입금액', '미수금', '입금상태', '세금계산서', '발행일', '현장 매입', '현장 순이익', '후기', '블로그', '특이사항'],
     ...[...r.jobs].sort((a, b) => a.date.localeCompare(b.date)).map((j) => [
       j.date, j.time || '', custName(cust(j)), cust(j)?.phone || '', j.address || '', j.source || '', j.work || '', j.worker || '', j.status,
       Number(j.amount) || 0, Number(j.discount) || 0, Number(j.extra) || 0,
       [j.discountNote && '할인: ' + j.discountNote, j.extraNote && '추가: ' + j.extraNote].filter(Boolean).join(' / '),
       saleAmount(j), vatLabel(j.vat), billed(j), paidSum(j), unpaid(j), payState(j),
       j.taxInvoice?.need ? (j.taxInvoice.issued ? '발행완료' : '미발행') : '해당없음', j.taxInvoice?.date || '',
-      jobCost(j.id), saleAmount(j) - jobCost(j.id), j.review?.text || '', j.note || '',
+      jobCost(j.id), saleAmount(j) - jobCost(j.id), j.review?.text || '', (j.blogs || []).map((b) => b.url).join(' '), j.note || '',
     ]),
   ];
-  XLSX.utils.book_append_sheet(wb, sheet(XLSX, jobsRows, [11, 6, 18, 14, 28, 9, 28, 12, 9, 11, 10, 10, 24, 11, 11, 11, 11, 11, 9, 10, 11, 11, 11, 24, 24]), '작업내역');
+  XLSX.utils.book_append_sheet(wb, sheet(XLSX, jobsRows, [11, 6, 18, 14, 28, 9, 28, 12, 9, 11, 10, 10, 24, 11, 11, 11, 11, 11, 9, 10, 11, 11, 11, 24, 30, 24]), '작업내역');
 
   const payRows = [
     ['입금(결제)일', '고객', '현장 주소', '작업내역', '결제수단', '입금은행', '받은 금액', '카드 실입금', '카드 수수료', '부가세', '세금계산서'],

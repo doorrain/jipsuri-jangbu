@@ -23,6 +23,7 @@ const P = {
   source: '<path d="M4 12h10M10 6l6 6-6 6"/><path d="M20 4v16"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
   cloud: '<path d="M7 18a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 18 9.5a4.3 4.3 0 0 1-.5 8.5z"/>',
-  home: '<path d="M4 11l8-6.5 8 6.5M6 9.5V20h12V9.5"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"/>',
+  home:'<path d="M4 11l8-6.5 8 6.5M6 9.5V20h12V9.5"/>',
 };
 export const ic = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[name] || ''}</svg>`;

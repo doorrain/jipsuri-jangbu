@@ -680,6 +680,13 @@ function renderJob(id) {
     </div>
 
     <div class="card">
+      <h3>${ic('link')} 블로그 글 <span class="r">${(j.blogs || []).length ? `${j.blogs.length}개` : ''}</span></h3>
+      ${(j.blogs || []).map((b, i) => `<div class="pay blog"><a class="grow" href="${esc(b.url)}" target="_blank" rel="noopener"><b>${esc(b.title || blogHost(b.url))}</b><span class="muted small">${esc(b.url)}</span></a><button class="btn sm ghost" data-blog="${i}">수정</button></div>`).join('')}
+      ${(j.blogs || []).length ? '' : '<div class="muted small">이 작업으로 쓴 블로그 글 주소를 연결해 두세요</div>'}
+      <button class="add-line" id="j-addblog">${ic('plus')} 블로그 링크 추가</button>
+    </div>
+
+    <div class="card">
       <h3>특이사항</h3>
       <label class="check"><input type="checkbox" id="j-revisit" ${j.revisit ? 'checked' : ''} /> 재방문 필요 (A/S·추가 작업)</label>
       ${j.note ? `<div class="note" style="margin-top:6px">${esc(j.note)}</div>` : '<div class="muted small">메모는 [수정]에서 입력해요</div>'}
@@ -712,6 +719,8 @@ function renderJob(id) {
   $('#j-addphoto').onclick = () => photoAddSheet(j);
   $('#j-zip') && ($('#j-zip').onclick = () => zipSheet([j], `${custName(c)}_${j.date || '날짜미정'}`));
   $('#j-review').onclick = () => reviewSheet(j);
+  $('#j-addblog').onclick = () => blogSheet(j);
+  $$('[data-blog]').forEach((b) => (b.onclick = () => blogSheet(j, Number(b.dataset.blog))));
   $('#j-revisit').onchange = (e) => save('jobs', { ...j, revisit: e.target.checked });
   $('#j-del').onclick = async () => {
     const msg = `이 작업을 삭제할까요?${(j.photos || []).length ? `\n사진 ${(j.photos || []).length}장도 함께 지워집니다.` : ''}${buys.length ? `\n연결된 매입 ${buys.length}건은 '공통 매입'으로 남습니다.` : ''}`;
@@ -919,6 +928,50 @@ function reviewSheet(j) {
       toast('후기 글은 저장했지만 캡처 사진은 올리지 못했어요');
     }
   };
+}
+
+/* ---------- 블로그 링크 ---------- */
+// 블로그에 사진·후기를 올렸다면 앱에는 주소만 남겨 저장공간을 아낍니다.
+function blogHost(url) {
+  try {
+    const h = new URL(url).hostname.replace(/^(www|m)\./, '');
+    if (/blog\.naver/.test(h)) return '네이버 블로그';
+    if (/tistory/.test(h)) return '티스토리';
+    if (/instagram/.test(h)) return '인스타그램';
+    if (/daangn|karrot/.test(h)) return '당근';
+    return h;
+  } catch {
+    return url;
+  }
+}
+
+function blogSheet(j, idx = -1) {
+  const list = [...(j.blogs || [])];
+  const cur = list[idx] || {};
+  const s = openSheet(`
+    ${sheetHead(idx >= 0 ? '블로그 링크 수정' : '블로그 링크 추가')}
+    <label class="field"><span>글 주소</span><input id="bl-url" type="url" inputmode="url" placeholder="블로그 글의 주소를 붙여넣으세요" value="${esc(cur.url || '')}" /></label>
+    <label class="field"><span>제목 (선택)</span><input id="bl-title" placeholder="비우면 '네이버 블로그'처럼 표시돼요" value="${esc(cur.title || '')}" /></label>
+    <div class="foot btns">${idx >= 0 ? '<button class="btn danger" id="bl-del" style="flex:0 0 96px">삭제</button>' : ''}<button class="btn" id="bl-save">저장</button></div>`);
+  if (idx < 0) setTimeout(() => $('#bl-url', s)?.focus(), 50);
+  $('#bl-save', s).onclick = async () => {
+    // 블로그 앱 '공유'로 복사하면 제목과 주소가 섞여 오므로 주소만 골라냅니다.
+    const raw = $('#bl-url', s).value.trim();
+    const found = raw.match(/https?:\/\/\S+/);
+    const url = found ? found[0] : raw && !/\s/.test(raw) ? `https://${raw}` : '';
+    if (!url) return toast('블로그 글 주소를 넣어 주세요');
+    const item = { url, title: $('#bl-title', s).value.trim() };
+    if (idx >= 0) list[idx] = item; else list.push(item);
+    await save('jobs', { ...j, blogs: list });
+    closeSheet();
+    toast('블로그 링크를 저장했어요');
+  };
+  $('#bl-del', s) && ($('#bl-del', s).onclick = async () => {
+    if (!confirm('이 블로그 링크를 지울까요? (블로그 글은 그대로 있어요)')) return;
+    list.splice(idx, 1);
+    await save('jobs', { ...j, blogs: list });
+    closeSheet();
+  });
 }
 
 /* ---------- 사진 ---------- */

@@ -215,7 +215,7 @@ function renderSchedule() {
   const monthBuy = store.state.purchases.filter((p) => inRange(p.date, mFrom, mTo)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const recv = jobsAll.filter(isReceivable);
   const inv = jobsAll.filter(needsInvoice);
-  const revisit = jobsAll.filter((j) => j.revisit);
+  const revisit = monthJobs.filter((j) => j.revisit); // 보고 있는 달의 재방문만
   const undated = jobsAll.filter((j) => !j.date && j.status === '문의');
   const todayN = jobsOn(t).filter((j) => j.status !== '취소').length;
   const d = toDate(t);
@@ -259,7 +259,7 @@ function renderSchedule() {
     <div class="alerts">
       ${recv.length ? `<button class="alert red" data-alert="recv">미수 ${recv.length}건 · ${num(recv.reduce((s, j) => s + unpaid(j), 0))}원</button>` : ''}
       ${inv.length ? `<button class="alert orange" data-alert="inv">계산서 미발행 ${inv.length}건</button>` : ''}
-      ${revisit.length ? `<button class="alert blue" data-alert="revisit">재방문 ${revisit.length}건</button>` : ''}
+      ${revisit.length ? `<button class="alert blue" data-alert="revisit">${selMonth}월 재방문 ${revisit.length}건</button>` : ''}
       <button class="alert gray" data-alert="month">${selMonth}월 작업 ${monthJobs.length}건${monthJobs.length ? ` · 완료 ${monthDone}` : ''}</button>
       ${undated.length ? `<button class="alert gray" data-alert="undated">날짜 미정 문의 ${undated.length}건</button>` : ''}
     </div>
@@ -289,7 +289,7 @@ function renderSchedule() {
     const map = {
       recv: ['미수금', recv],
       inv: ['세금계산서 미발행', inv],
-      revisit: ['재방문 필요', revisit],
+      revisit: [`${selMonth}월 재방문`, revisit],
       undated: ['날짜 미정 문의', undated],
       month: [`${selMonth}월 작업`, monthJobs],
     };

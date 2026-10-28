@@ -1,9 +1,9 @@
 {
-  "name": "하이집수리 복원조색",
-  "short_name": "복원조색",
-  "description": "사진으로 복원 조색 레시피 받기 · 시험칠 보정 · 결 그리기 안내",
-  "id": "/jipsuri-joseak/?app=joseak",
-  "start_url": "./#jobs",
+  "name": "하이집수리 현장장부",
+  "short_name": "현장장부",
+  "description": "일정·고객·매출·매입·현장 사진 관리",
+  "id": "/jipsuri-jangbu/?app=hyeonjang",
+  "start_url": "./#schedule",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f5f6f8",
@@ -14,5 +14,10 @@
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
-  ]
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  }
 }

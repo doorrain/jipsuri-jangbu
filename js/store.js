@@ -1,24 +1,24 @@
 // 데이터 저장소: config.js에 Supabase 설정이 있으면 두 사람이 함께 쓰는 클라우드,
 // 없으면(또는 주소 끝에 ?local) 이 기기 안(localStorage)에만 저장합니다.
-// 견적 앱과 같은 Supabase 프로젝트를 쓰지만, 표는 color_docs 로 따로 둡니다.
+// 견적 앱과 같은 Supabase 프로젝트를 쓰지만, 표는 site_docs 로 따로 둡니다.
 // 마지막 데이터를 휴대폰에 보관해 두어 신호가 약한 현장에서도 열리고,
 // 보내지 못한 변경은 인터넷이 다시 연결되면 자동으로 올립니다.
 import { supabaseConfig } from '../config.js';
 import { DEFAULT_SETTINGS } from './seed.js';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
-const LS_KEY = 'joseak-data-v1';
-const CACHE_KEY = 'joseak-cloud-cache-v1';
-const OUTBOX_KEY = 'joseak-outbox-v1';
-const TABLE = 'color_docs'; // (col, id, data) 한 표에 조색 작업·설정을 저장
-export const BUCKET = 'color-photos';
+const LS_KEY = 'hyeonjang-data-v1';
+const CACHE_KEY = 'hyeonjang-cloud-cache-v1';
+const OUTBOX_KEY = 'hyeonjang-outbox-v1';
+const TABLE = 'site_docs'; // (col, id, data) 한 표에 고객·작업·매입·설정을 저장
+export const BUCKET = 'site-photos';
 
 const forceLocal = /[?&]local\b/.test(location.search);
 const listeners = new Set();
 let sb = null;
 let channel = null;
 
-export const COLS = ['jobs'];
+export const COLS = ['customers', 'jobs', 'purchases'];
 
 export const store = {
   mode: supabaseConfig && !forceLocal ? 'cloud' : 'local',
@@ -26,7 +26,7 @@ export const store = {
   ready: false,
   online: true,
   pending: 0,
-  state: { jobs: [], settings: { ...DEFAULT_SETTINGS } },
+  state: { customers: [], jobs: [], purchases: [], settings: { ...DEFAULT_SETTINGS } },
 };
 export const supabase = () => sb;
 
@@ -80,7 +80,7 @@ function persist() {
 }
 function loadState(d) {
   store.state = {
-    jobs: d.jobs || [],
+    customers: d.customers || [], jobs: d.jobs || [], purchases: d.purchases || [],
     settings: withDefaults(d.settings),
   };
 }
@@ -96,7 +96,7 @@ async function fetchAll() {
     rows.push(...data);
     if (data.length < 1000) break;
   }
-  const st = { jobs: [], settings: withDefaults() };
+  const st = { customers: [], jobs: [], purchases: [], settings: withDefaults() };
   rows.forEach((r) => {
     if (r.col === 'settings') st.settings = withDefaults(r.data);
     else if (COLS.includes(r.col)) st[r.col].push(rowToObj(r));
@@ -110,7 +110,7 @@ async function fetchAll() {
 function startRealtime() {
   if (channel) sb.removeChannel(channel);
   channel = sb
-    .channel('color-docs-changes')
+    .channel('site-docs-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: TABLE }, (p) => {
       if (p.eventType === 'DELETE') applyDel(p.old.col, p.old.id);
       else applyPut(p.new.col, rowToObj(p.new));

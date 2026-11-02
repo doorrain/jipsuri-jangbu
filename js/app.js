@@ -76,8 +76,13 @@ function openSheet(html, onMount, draftKey) {
   bg.addEventListener('input', (e) => { if (e.isTrusted) bg.dirty = true; });
   bg.addEventListener('change', (e) => { if (e.isTrusted) bg.dirty = true; });
   bg.addEventListener('click', (e) => {
-    if (e.target !== bg) return;
-    if (bg.dirty) toast('작성 중이에요. 닫으려면 오른쪽 위 ✕를 누르세요');
+    if (e.target !== bg) {
+      // 칩·버튼으로 고른 것도 작성한 것으로 봄
+      if (e.isTrusted && e.target.closest('.sheet button, .sheet input') && !e.target.closest('[data-close]')) bg.dirty = true;
+      return;
+    }
+    // 입력 칸이 있는 창은 바깥(좌우 여백 포함)을 눌러도 닫지 않음. 목록·선택 창만 닫힘
+    if (bg.dirty || $('input:not([type=hidden]), textarea, select', bg)) toast('닫으려면 오른쪽 위 ✕를 누르세요');
     else closeSheet();
   });
   $$('[data-close]', bg).forEach((b) => (b.onclick = () => {
@@ -443,7 +448,8 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
       <div class="chips" id="wk-chips" style="margin-bottom:8px"></div>
       <div class="row"><input id="wk-new" class="input grow" placeholder="다른 사람 이름" autocomplete="off" /><button type="button" class="btn sm line" id="wk-add" style="height:48px">${ic('plus')} 추가</button></div>
     </div>
-    <div class="grid2" style="align-items:end">${moneyField('jf-amt', '견적 금액 (나중에 입력해도 돼요)', j.amount)}<div class="field">${chipRow('vat', VAT_MODES, j.vat || 'none')}</div></div>
+    ${moneyField('jf-amt', '견적 금액 (나중에 입력해도 돼요)', j.amount)}
+    <div class="field" style="margin-top:-6px">${chipRow('vat', VAT_MODES, j.vat || 'none')}</div>
     <div class="small" id="jf-dc-msg" hidden style="margin:-8px 0 14px;color:var(--accent);font-weight:600"></div>
     ${isNew ? '' : `<div class="field"><span>상태</span>${chipRow('status', STATUSES, j.status)}</div>`}
     <label class="field"><span>메모 · 특이사항</span><textarea id="jf-note" placeholder="출입 방법, 주차, 고객 요청 등">${esc(j.note)}</textarea></label>
@@ -1622,6 +1628,21 @@ function takeShared() {
   tryOpen();
 }
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  const hadSW = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    // PC는 창을 오래 켜 두므로 다시 볼 때마다 새 버전이 있는지 확인
+    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && reg.update().catch(() => {}));
+  });
+  // 새 버전이 설치되면 화면을 새로 불러와 바로 적용 (작성 중이면 창을 닫은 뒤에)
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadSW) return;
+    const reloadWhenFree = () => {
+      if ($('#sheet-root').firstElementChild || draft) return setTimeout(reloadWhenFree, 3000);
+      location.reload();
+    };
+    reloadWhenFree();
+  });
+}
 render();
 initStore().then(takeShared);

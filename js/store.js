@@ -88,7 +88,20 @@ function loadState(d) {
 /* ---------- 클라우드(Supabase) ---------- */
 const rowToObj = (r) => (r.col === 'settings' ? r.data : { ...r.data, id: r.id });
 
+// 불러오기 도중에 저장하거나 다른 기기 변경이 들어오면, 불러온 옛 목록이 그걸 덮어써
+// 방금 넣은 일정이 화면에서 사라질 수 있습니다. 최근 변경을 기억했다가 다시 적용합니다.
+let fetchGen = 0;
+let recent = []; // { ts, op }
+function remember(op) {
+  const now = Date.now();
+  recent = recent.filter((x) => now - x.ts < 120000);
+  recent.push({ ts: now, op });
+}
+const applyOp = (op) => (op.t === 'put' ? applyPut(op.col, op.obj) : applyDel(op.col, op.id));
+
 async function fetchAll() {
+  const gen = ++fetchGen;
+  const started = Date.now();
   const rows = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb.from(TABLE).select('col,id,data').range(from, from + 999);
@@ -96,6 +109,7 @@ async function fetchAll() {
     rows.push(...data);
     if (data.length < 1000) break;
   }
+  if (gen !== fetchGen) return; // 더 나중에 시작한 불러오기가 있으면 그쪽 결과를 씀
   const st = { customers: [], jobs: [], purchases: [], settings: withDefaults() };
   rows.forEach((r) => {
     if (r.col === 'settings') st.settings = withDefaults(r.data);
@@ -103,7 +117,9 @@ async function fetchAll() {
   });
   store.state = st;
   // 아직 못 올린 변경은 화면에 계속 보이도록 다시 적용
-  readJSON(OUTBOX_KEY, []).forEach((op) => (op.t === 'put' ? applyPut(op.col, op.obj) : applyDel(op.col, op.id)));
+  readJSON(OUTBOX_KEY, []).forEach(applyOp);
+  // 불러오는 사이(조금 여유 두고)에 생긴 변경도 다시 적용
+  recent.filter((x) => x.ts >= started - 5000).forEach((x) => applyOp(x.op));
   persist();
 }
 
@@ -112,8 +128,9 @@ function startRealtime() {
   channel = sb
     .channel('site-docs-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: TABLE }, (p) => {
-      if (p.eventType === 'DELETE') applyDel(p.old.col, p.old.id);
-      else applyPut(p.new.col, rowToObj(p.new));
+      const op = p.eventType === 'DELETE' ? { t: 'del', col: p.old.col, id: p.old.id } : { t: 'put', col: p.new.col, obj: rowToObj(p.new) };
+      applyOp(op);
+      remember(op);
       persist();
       emit();
     })
@@ -211,8 +228,8 @@ function flushOutbox() {
 }
 
 async function write(op) {
-  if (op.t === 'put') applyPut(op.col, op.obj);
-  else applyDel(op.col, op.id);
+  applyOp(op);
+  remember(op);
   persist();
   emit();
   if (store.mode === 'cloud') {

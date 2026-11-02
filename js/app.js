@@ -62,16 +62,75 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 2000);
 }
-function openSheet(html, onMount) {
+// 작성 중인 창 보호: 바깥을 잘못 눌러도 닫히지 않고, 뒤로가기 등으로 닫히면 '이어쓰기'로 되살립니다.
+// draftKey가 있는 창(새 일정·새 매입 등)은 같은 창을 다시 열 때 자동으로 이어집니다.
+let draft = null; // { key, title, bg }
+function openSheet(html, onMount, draftKey) {
   const root = $('#sheet-root');
+  if (draftKey && draft?.key === draftKey) return resumeDraft();
+  if (root.firstElementChild?.dirty) dismissSheet(); // 작성 중이던 창은 보관
   root.innerHTML = `<div class="sheet-bg"><div class="sheet"><div class="grab"></div>${html}</div></div>`;
   const bg = root.firstElementChild;
-  bg.addEventListener('click', (e) => { if (e.target === bg) closeSheet(); });
-  $$('[data-close]', bg).forEach((b) => (b.onclick = closeSheet));
+  bg.draftKey = draftKey || '';
+  // 사람이 직접 입력했을 때만 '작성 중'으로 봄
+  bg.addEventListener('input', (e) => { if (e.isTrusted) bg.dirty = true; });
+  bg.addEventListener('change', (e) => { if (e.isTrusted) bg.dirty = true; });
+  bg.addEventListener('click', (e) => {
+    if (e.target !== bg) return;
+    if (bg.dirty) toast('작성 중이에요. 닫으려면 오른쪽 위 ✕를 누르세요');
+    else closeSheet();
+  });
+  $$('[data-close]', bg).forEach((b) => (b.onclick = () => {
+    if (bg.dirty && !confirm('작성 중인 내용을 지우고 닫을까요?')) return;
+    closeSheet();
+  }));
   onMount && onMount(bg.firstElementChild);
   return bg.firstElementChild;
 }
-const closeSheet = () => ($('#sheet-root').innerHTML = '');
+// 저장을 마쳤거나 일부러 닫을 때
+function closeSheet() {
+  const bg = $('#sheet-root').firstElementChild;
+  if (bg && draft?.bg === bg) draft = null;
+  $('#sheet-root').innerHTML = '';
+  drawDraftPill();
+}
+// 뒤로가기·화면 이동처럼 의도치 않게 닫힐 때: 작성 중이면 보관
+function dismissSheet() {
+  const root = $('#sheet-root');
+  const bg = root.firstElementChild;
+  if (bg?.dirty) {
+    draft = { key: bg.draftKey, title: $('.sh h2', bg)?.textContent || '작성 중인 내용', bg };
+    bg.remove();
+  }
+  root.innerHTML = '';
+  drawDraftPill();
+}
+function resumeDraft() {
+  if (!draft) return null;
+  const root = $('#sheet-root');
+  root.innerHTML = '';
+  root.append(draft.bg);
+  drawDraftPill();
+  toast('작성하던 내용을 불러왔어요');
+  return draft.bg.firstElementChild;
+}
+function drawDraftPill() {
+  let pill = $('#draft-pill');
+  const show = draft && !$('#sheet-root').firstElementChild;
+  if (!show) return pill && pill.remove();
+  if (!pill) {
+    pill = document.createElement('div');
+    pill.id = 'draft-pill';
+    document.body.append(pill);
+  }
+  pill.innerHTML = `<button class="go">${ic('edit')} 작성 중: ${esc(draft.title)} · 이어쓰기</button><button class="x" aria-label="버리기">${ic('x')}</button>`;
+  pill.querySelector('.go').onclick = resumeDraft;
+  pill.querySelector('.x').onclick = () => {
+    if (!confirm('작성 중인 내용을 버릴까요?')) return;
+    draft = null;
+    drawDraftPill();
+  };
+}
 const sheetHead = (title) => `<div class="sh"><h2>${title}</h2><button class="icon-btn" data-close>${ic('x')}</button></div>`;
 const chipRow = (name, opts, val, cls = '') =>
   `<div class="chips ${cls}" data-chips="${name}">${opts.map((o) => {
@@ -112,7 +171,7 @@ function go(hash) {
   if (location.hash === hash) render();
   else location.hash = hash;
 }
-window.addEventListener('hashchange', () => { closeSheet(); render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { dismissSheet(); render(); window.scrollTo(0, 0); });
 
 /* ================= 렌더링 ================= */
 // 같은 순간에 여러 번 불려도 한 번만 그림
@@ -312,8 +371,42 @@ function blankJob(customerId) {
   };
 }
 
+// 시간 입력: 휴대폰은 기본 시계, PC는 시·분 목록 (PC 기본 시간 창은 분이 띄엄띄엄 나와 헷갈림)
+const isPC = matchMedia('(hover: hover) and (pointer: fine)').matches;
+const MINUTES = ['00', '10', '20', '30', '40', '50'];
+const hourLabel = (h) => `${h < 12 ? '오전' : '오후'} ${h % 12 || 12}시`;
+function timeField(v = '') {
+  if (!isPC) return `<input type="time" id="jf-time" value="${esc(v)}" />`;
+  const [h, m] = v ? v.split(':') : ['', ''];
+  const mins = m && !MINUTES.includes(m) ? [...MINUTES, m].sort() : MINUTES;
+  return `<div class="time-pc"><input type="hidden" id="jf-time" value="${esc(v)}" />
+    <select id="jf-hh"><option value="">시간 미정</option>${Array.from({ length: 24 }, (_, k) => (k + 6) % 24).map((i) => `<option value="${String(i).padStart(2, '0')}" ${h !== '' && Number(h) === i ? 'selected' : ''}>${hourLabel(i)}</option>`).join('')}</select>
+    <select id="jf-mm" ${h === '' ? 'disabled' : ''}>${mins.map((x) => `<option value="${x}" ${x === (m || '00') ? 'selected' : ''}>${x}분</option>`).join('')}</select></div>`;
+}
+function bindTimeField(s) {
+  const hh = $('#jf-hh', s), mm = $('#jf-mm', s);
+  if (!hh) return;
+  hh.onchange = mm.onchange = () => {
+    mm.disabled = !hh.value;
+    $('#jf-time', s).value = hh.value ? `${hh.value}:${mm.value}` : '';
+  };
+}
+function setTimeField(s, v) {
+  $('#jf-time', s).value = v;
+  const hh = $('#jf-hh', s);
+  if (!hh) return;
+  const [h, m] = v.split(':');
+  const mm = $('#jf-mm', s);
+  if (![...mm.options].some((o) => o.value === m)) mm.add(new Option(`${m}분`, m));
+  hh.value = h;
+  mm.value = m;
+  mm.disabled = false;
+}
+
 function openJobForm({ job, customerId, prefill, afterSave } = {}) {
   const isNew = !job;
+  const draftKey = isNew ? (customerId || prefill ? '' : 'job-new') : `job-${job.id}`;
+  if (draftKey && draft?.key === draftKey) return resumeDraft();
   const j = job ? JSON.parse(JSON.stringify(job)) : blankJob(customerId);
   let cust = store.state.customers.find((c) => c.id === j.customerId) || null;
   if (isNew && cust) {
@@ -341,7 +434,7 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
         <button type="button" class="chip" data-d="${addDays(today(), 2)}">모레</button>
         <button type="button" class="chip" data-d="">미정</button>
       </div>
-      <div class="grid2"><input type="date" id="jf-date" value="${esc(j.date)}" /><input type="time" id="jf-time" value="${esc(j.time)}" step="600" /></div>
+      <div class="grid2"><input type="date" id="jf-date" value="${esc(j.date)}" />${timeField(j.time)}</div>
     </label>
     <div class="field"><span>유입경로</span>${chipRow('source', SOURCES, j.source)}</div>
     <label class="field"><span>현장 주소</span><input id="jf-addr" value="${esc(j.address)}" placeholder="예) 별내 리슈빌 2113동 102호" autocomplete="off" /></label>
@@ -359,7 +452,7 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
       <button type="button" class="add-line" id="jf-pick" style="margin-top:0">${ic('camera')} 사진 첨부</button>
       <input type="file" id="jf-files" accept="image/*" multiple hidden /></div>` : ''}
     <div class="foot"><button class="btn block accent" id="jf-save">${isNew ? '일정 등록' : '저장'}</button></div>
-  `);
+  `, null, draftKey);
   // 등록과 함께 올릴 사진 (고객이 보낸 현장 사진, 채팅 캡처 등)
   let pending = [];
   let parsedDiscount = null; // 캡처·문자에서 찾은 쿠폰 할인
@@ -376,6 +469,7 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
       if (b) { pending.splice(Number(b.dataset.rm), 1); drawPrev(); }
     });
   }
+  bindTimeField(s);
   moneyInput($('#jf-amt', s));
   bindChips(s, 'source', null, true);
   bindChips(s, 'vat');
@@ -387,11 +481,25 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
   const splitWorkers = (v) => String(v || '').split(/[,·/]+/).map((x) => x.trim()).filter(Boolean);
   const picked = new Set(splitWorkers(j.worker));
   // 예전에 BEE를 적은 작업이 있어도 버튼 목록에는 띄우지 않음 (그 작업에 이미 선택돼 있으면 표시)
-  const wkOptions = [...new Set([...workerNames.flatMap(splitWorkers).filter((w) => w !== 'BEE'), ...picked])];
+  // ✕로 뺀 이름은 설정(hiddenWorkers)에 기억해 버튼 목록에서만 숨김 (예전 작업 기록은 그대로)
+  const hiddenWk = new Set(store.state.settings.hiddenWorkers || []);
+  const saveHidden = () => saveSettings({ ...store.state.settings, hiddenWorkers: [...hiddenWk] });
+  const wkOptions = [...new Set([...workerNames.flatMap(splitWorkers).filter((w) => w !== 'BEE' && !hiddenWk.has(w)), ...picked])];
   const drawWorkers = () => {
-    $('#wk-chips', s).innerHTML = wkOptions.map((w) => `<button type="button" class="chip ${picked.has(w) ? 'on' : ''}" data-wk="${esc(w)}">${picked.has(w) ? '✓ ' : ''}${esc(w)}</button>`).join('');
+    $('#wk-chips', s).innerHTML = wkOptions.map((w) => `<button type="button" class="chip wk ${picked.has(w) ? 'on' : ''}" data-wk="${esc(w)}">${picked.has(w) ? '✓ ' : ''}${esc(w)}${w === 'LEE' ? '' : `<i class="wk-x" data-wk-x="${esc(w)}" title="목록에서 빼기">${ic('x')}</i>`}</button>`).join('');
   };
   $('#wk-chips', s).addEventListener('click', (e) => {
+    const x = e.target.closest('[data-wk-x]');
+    if (x) {
+      const w = x.dataset.wkX;
+      picked.delete(w);
+      wkOptions.splice(wkOptions.indexOf(w), 1);
+      hiddenWk.add(w);
+      saveHidden();
+      drawWorkers();
+      toast(`'${w}'을(를) 작업자 목록에서 뺐어요`);
+      return;
+    }
     const b = e.target.closest('[data-wk]');
     if (!b) return;
     const w = b.dataset.wk;
@@ -403,6 +511,7 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
     splitWorkers(inp.value).forEach((w) => {
       if (!wkOptions.includes(w)) wkOptions.push(w);
       picked.add(w);
+      if (hiddenWk.delete(w)) saveHidden(); // 뺐던 이름을 다시 적으면 목록에 복귀
     });
     inp.value = '';
     drawWorkers();
@@ -491,7 +600,7 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
       if (!p.raw) return;
       const found = [];
       if (p.date) { dateInput.value = p.date; syncDateChips(); found.push('날짜'); }
-      if (p.time) { $('#jf-time', s).value = p.time; found.push('시간'); }
+      if (p.time) { setTimeField(s, p.time); found.push('시간'); }
       if (p.address) { $('#jf-addr', s).value = p.address; found.push('주소'); }
       if (p.source) { $$('[data-chips="source"] button', s).forEach((b) => b.classList.toggle('on', b.dataset.v === p.source)); found.push('유입경로'); }
       if (p.amount) { $('#jf-amt', s).value = num(p.amount); found.push('금액'); }
@@ -1226,6 +1335,8 @@ function renderLedger() {
 /* ---------- 매입 입력 ---------- */
 function purchaseSheet(p, jobId) {
   const isNew = !p;
+  const draftKey = isNew ? (jobId ? '' : 'buy-new') : `buy-${p.id}`;
+  if (draftKey && draft?.key === draftKey) return resumeDraft();
   const x = p ? JSON.parse(JSON.stringify(p)) : {
     id: newId('bu'), date: today(), amount: '', vendor: '', item: '', category: jobId ? '현장 자재' : '', method: '카드', payer: me(),
     taxInvoice: { need: false, received: false, date: '' }, jobId: jobId || '', memo: '', labor: null,
@@ -1259,7 +1370,7 @@ function purchaseSheet(p, jobId) {
     <div class="field"><span>결제자</span>${chipRow('payer', PAYERS, x.payer)}</div>
     <div class="field"><span>세금계산서</span>${chipRow('ti', [{ k: 'none', label: '해당없음' }, { k: 'need', label: '받아야 함' }, { k: 'received', label: '받음' }], tiState)}</div>
     <label class="field"><span>메모</span><input id="bu-memo" value="${esc(x.memo)}" autocomplete="off" /></label>
-    <div class="foot btns">${isNew ? '' : '<button class="btn danger" id="bu-del" style="flex:0 0 96px">삭제</button>'}<button class="btn" id="bu-save">저장</button></div>`);
+    <div class="foot btns">${isNew ? '' : '<button class="btn danger" id="bu-del" style="flex:0 0 96px">삭제</button>'}<button class="btn" id="bu-save">저장</button></div>`, null, draftKey);
   moneyInput($('#bu-amt', s));
   moneyInput($('#lb-daily', s));
   bindChips(s, 'method');

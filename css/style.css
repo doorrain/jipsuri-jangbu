@@ -125,6 +125,11 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 }
 .chip.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
 .chip.sm { height: 30px; padding: 0 11px; font-size: 13px; }
+.chip.wk { display: inline-flex; align-items: center; gap: 2px; padding-right: 6px; }
+.chip.wk:not(:has(.wk-x)) { padding-right: 14px; }
+.wk-x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-left: 2px; border-radius: 99px; opacity: .55; }
+.wk-x:hover { opacity: 1; background: rgba(127, 127, 127, .18); }
+.wk-x svg.i { width: 14px; height: 14px; }
 .seg { display: flex; background: var(--gray-soft); border-radius: 12px; padding: 3px; gap: 2px; }
 .seg button { flex: 1; height: 36px; border-radius: 10px; font-size: 14px; font-weight: 700; color: var(--muted); }
 .seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
@@ -151,6 +156,11 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 }
 .field .money-wrap .unit { flex: none; color: var(--muted); font-size: 15px; font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#draft-pill { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tab-h) + var(--safe-b) + 84px); z-index: 55; display: flex; align-items: center; background: var(--accent); color: #fff; border-radius: 99px; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); max-width: calc(100vw - 32px); }
+#draft-pill button { color: inherit; display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; padding: 11px 6px 11px 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#draft-pill .x { padding: 11px 14px 11px 8px; opacity: .85; }
+.time-pc { display: grid; grid-template-columns: 1.4fr 1fr; gap: 6px; min-width: 0; }
+.time-pc select:disabled { opacity: .45; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 15px; font-weight: 600; cursor: pointer; }
 .check input { width: 22px; height: 22px; accent-color: var(--ink); }
 

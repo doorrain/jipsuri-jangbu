@@ -204,6 +204,8 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .kv.as-row { width: 100%; text-align: left; }
 .card.as-parent { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 14px; }
 .card.as-parent b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-btn { display: block; width: 100%; margin: 10px 0 0; padding: 6px 0; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; text-align: center; }
+.card + .link-btn { margin: -4px 0 14px; }
 /* 할 일 · 미팅 */
 .tk-tools { display: flex; gap: 6px; }
 .task { display: flex; align-items: flex-start; gap: 10px; background: var(--card); border: 1px solid var(--line-2); border-radius: 14px; padding: 12px; margin-bottom: 8px; }

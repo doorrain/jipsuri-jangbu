@@ -427,8 +427,25 @@ async function migrateAS() {
   }
 }
 
+// 이미 등록한 작업을 'A/S 방문'으로 바꾸기: 같은 고객의 원래 작업을 고름
+function pickAsParent(j, candidates, children = []) {
+  openSheet(`
+    ${sheetHead('어느 작업의 A/S인가요?')}
+    <p class="muted small" style="margin-top:-6px">고르면 이 기록은 그 작업의 A/S 방문으로 바뀌고, 재의뢰에서 빠져요. 금액·입금 기록은 그대로예요.</p>
+    <div class="list">${candidates.map((x) => `<button class="li" data-pick="${x.id}"><div class="grow"><div class="t1">${esc(x.date ? md(x.date) : '날짜 미정')} · ${esc(x.work || '작업')}</div><div class="t2">${esc(x.address || '')}${saleAmount(x) ? ` · ${won(saleAmount(x))}` : ''}</div></div>${ic('right')}</button>`).join('')}</div>`, (s) => {
+    $$('[data-pick]', s).forEach((b) => (b.onclick = async () => {
+      const parent = b.dataset.pick;
+      await save('jobs', { ...j, asOf: parent, revisit: false });
+      // 이 작업에 달려 있던 A/S도 같은 원래 작업 밑으로 옮김
+      for (const c of children) await save('jobs', { ...c, asOf: parent });
+      closeSheet();
+      toast('A/S 방문으로 바꿨어요');
+    }));
+  });
+}
+
 // 할 일·미팅 전체 보기 + 검색 (미팅 기록 찾기)
-function tasksListSheet(mode = 'open') {
+function tasksListSheet(mode = 'open', month = '') { // month: 'YYYY-MM' (일정 화면 '○월 밀린 할 일'에서 열 때)
   const s = openSheet(`
     ${sheetHead('할 일 · 미팅')}
     <input class="input" id="tl-q" placeholder="제목·메모 검색 (초성도 돼요)" autocomplete="off" style="margin-bottom:10px" />
@@ -440,7 +457,7 @@ function tasksListSheet(mode = 'open') {
     const t = today();
     const list = tasksAll()
       .filter(mineOk)
-      .filter((x) => (mode === 'open' ? !x.done : mode === 'overdue' ? !x.done && x.date && x.date < t : mode === 'meet' ? x.kind === '미팅' : true))
+      .filter((x) => (mode === 'open' ? !x.done : mode === 'overdue' ? !x.done && x.date && x.date < t && (!month || x.date.startsWith(month)) : mode === 'meet' ? x.kind === '미팅' : true))
       .filter((x) => !q || matches(`${x.title} ${x.memo} ${x.who}`, q))
       .sort((a, b) => (mode === 'meet' || mode === 'all' ? (b.date || '').localeCompare(a.date || '') : (a.date || '9999').localeCompare(b.date || '9999')));
     $('#tl-list', s).innerHTML = list.map((x) => taskCard(x, true)).join('') || '<div class="empty">없습니다</div>';
@@ -470,14 +487,19 @@ function renderSchedule() {
   const monthRepeat = monthMain.filter(isRepeat);
   const monthAS = monthJobs.filter(isAS);
   const monthASDone = monthAS.filter((j) => ['작업완료', '정산완료'].includes(j.status)).length;
-  const asWait = jobsAll.filter((j) => isAS(j) && !j.date);
+  // 위쪽 버튼은 모두 '보고 있는 달' 기준. 날짜 없는 기록은 등록한 날(A/S 대기는 원래 작업 날짜)의 달로 셈
+  const madeOn = (x) => (x.createdAt ? ymd(new Date(x.createdAt)) : '');
+  const monthOf = (j) => j.date || (isAS(j) && store.state.jobs.find((x) => x.id === j.asOf)?.date) || madeOn(j);
+  const inSel = (j) => inRange(monthOf(j), mFrom, mTo);
+  const asWait = jobsAll.filter((j) => isAS(j) && !j.date && inSel(j));
   const monthSales = monthJobs.reduce((s, j) => s + saleAmount(j), 0);
   const monthBuy = store.state.purchases.filter((p) => inRange(p.date, mFrom, mTo)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const recv = jobsAll.filter(isReceivable);
-  const inv = jobsAll.filter(needsInvoice);
+  const recv = jobsAll.filter((j) => isReceivable(j) && inSel(j));
+  const inv = jobsAll.filter((j) => needsInvoice(j) && inSel(j));
   const undated = jobsAll.filter((j) => !j.date && j.status === '문의' && !isAS(j));
+  const undatedMonth = undated.filter(inSel);
   const todayN = jobsOn(t).filter((j) => j.status !== '취소').length;
-  const overdue = tasksAll().filter((x) => !x.done && x.date && x.date < t && mineOk(x)).sort(byDate);
+  const overdue = tasksAll().filter((x) => !x.done && x.date && x.date < t && inRange(x.date, mFrom, mTo) && mineOk(x)).sort(byDate);
   const undatedTasks = tasksAll().filter((x) => !x.done && !x.date && mineOk(x));
   const d = toDate(t);
 
@@ -520,14 +542,14 @@ function renderSchedule() {
       <button class="kpi" data-ledger="buys" style="text-align:left"><div class="l">${selMonth}월 매입</div><div class="v">${short(monthBuy)}</div></button>
     </section>
     <div class="alerts">
-      ${overdue.length ? `<button class="alert orange" data-tk-overdue>밀린 할 일 ${overdue.length}건</button>` : ''}
-      ${recv.length ? `<button class="alert red" data-alert="recv">미수 ${recv.length}건 · ${num(recv.reduce((s, j) => s + unpaid(j), 0))}원</button>` : ''}
-      ${inv.length ? `<button class="alert orange" data-alert="inv">계산서 미발행 ${inv.length}건</button>` : ''}
-      ${asWait.length ? `<button class="alert orange" data-alert="asWait">A/S 대기 ${asWait.length}건</button>` : ''}
+      ${overdue.length ? `<button class="alert orange" data-tk-overdue>${selMonth}월 밀린 할 일 ${overdue.length}건</button>` : ''}
+      ${recv.length ? `<button class="alert red" data-alert="recv">${selMonth}월 미수 ${recv.length}건 · ${num(recv.reduce((s, j) => s + unpaid(j), 0))}원</button>` : ''}
+      ${inv.length ? `<button class="alert orange" data-alert="inv">${selMonth}월 계산서 미발행 ${inv.length}건</button>` : ''}
+      ${asWait.length ? `<button class="alert orange" data-alert="asWait">${selMonth}월 A/S 대기 ${asWait.length}건</button>` : ''}
       <button class="alert gray" data-alert="month">${selMonth}월 작업 ${monthMain.length}건${monthMain.length ? ` · 완료 ${monthDone}` : ''}</button>
       ${monthRepeat.length ? `<button class="alert blue" data-alert="repeat">${selMonth}월 재의뢰 ${monthRepeat.length}건</button>` : ''}
       ${monthAS.length ? `<button class="alert blue" data-alert="as">${selMonth}월 A/S ${monthAS.length}건${monthASDone ? ` · 완료 ${monthASDone}` : ''}</button>` : ''}
-      ${undated.length ? `<button class="alert gray" data-alert="undated">날짜 미정 문의 ${undated.length}건</button>` : ''}
+      ${undatedMonth.length ? `<button class="alert gray" data-alert="undated">${selMonth}월 날짜 미정 문의 ${undatedMonth.length}건</button>` : ''}
     </div>
     <div class="cal-head">
       <button class="icon-btn" data-cal-move="-1">${ic('left')}</button>
@@ -548,7 +570,7 @@ function renderSchedule() {
   bindTasks(view);
   $('[data-tk-new]').onclick = () => taskSheet(null, { date: sel });
   $('[data-tk-all]').onclick = () => tasksListSheet();
-  $('[data-tk-overdue]') && ($('[data-tk-overdue]').onclick = () => tasksListSheet('overdue'));
+  $('[data-tk-overdue]') && ($('[data-tk-overdue]').onclick = () => tasksListSheet('overdue', mFrom.slice(0, 7)));
   $('[data-mine]') && ($('[data-mine]').onclick = () => { ui.mine = !ui.mine; saveUi(); render(); });
   $$('[data-day]').forEach((b) => (b.onclick = () => { ui.sel = b.dataset.day; render(); }));
   // 매출·매입 요약을 누르면 그 달 장부로
@@ -562,12 +584,12 @@ function renderSchedule() {
   $$('[data-alert]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.alert;
     const map = {
-      recv: ['미수금', recv],
-      inv: ['세금계산서 미발행', inv],
+      recv: [`${selMonth}월 미수금`, recv],
+      inv: [`${selMonth}월 세금계산서 미발행`, inv],
       repeat: [`${selMonth}월 재의뢰 (예전 고객이 다시 맡긴 작업)`, monthRepeat],
       as: [`${selMonth}월 A/S 방문`, monthAS],
-      asWait: ['A/S 대기 (날짜 정해야 함)', asWait],
-      undated: ['날짜 미정 문의', undated],
+      asWait: [`${selMonth}월 A/S 대기 (날짜 정해야 함)`, asWait],
+      undated: [`${selMonth}월 날짜 미정 문의`, undatedMonth],
       month: [`${selMonth}월 작업`, monthMain],
     };
     jobListSheet(map[k][0], map[k][1]);
@@ -946,6 +968,9 @@ function renderJob(id) {
   const others = customerJobs(j.customerId).filter((x) => x.id !== j.id);
   const asParent = isAS(j) ? store.state.jobs.find((x) => x.id === j.asOf) : null;
   const asList = asJobsOf(j.id);
+  // 이 작업을 A/S로 바꿀 때 고를 수 있는 원래 작업: 같은 고객의 이전 일반 작업
+  const asCandidates = isAS(j) ? [] : customerJobs(j.customerId)
+    .filter((x) => x.id !== j.id && !isAS(x) && x.status !== '취소' && (!j.date || !x.date || x.date <= j.date));
   const linkedTasks = tasksAll().filter((x) => x.jobId === j.id).sort((a, b) => (a.done - b.done) || (b.date || '').localeCompare(a.date || ''));
   const photos = (j.photos || []).filter((p) => ui.stage === '전체' || p.stage === ui.stage);
   const ti = j.taxInvoice || {};
@@ -1020,12 +1045,14 @@ function renderJob(id) {
       <button class="add-line" id="j-addblog">${ic('plus')} 블로그 링크 추가</button>
     </div>
 
-    ${asParent ? `<button class="card as-parent" data-go="#job/${asParent.id}"><span class="pill orange">A/S</span> 원래 작업: <b>${esc(md(asParent.date) || '날짜 미정')} ${esc(asParent.work || '')}</b> ${ic('right')}</button>` : `
+    ${asParent ? `<button class="card as-parent" data-go="#job/${asParent.id}"><span class="pill orange">A/S</span> 원래 작업: <b>${esc(md(asParent.date) || '날짜 미정')} ${esc(asParent.work || '')}</b> ${ic('right')}</button>
+    <button class="link-btn" id="j-unas">A/S가 아니에요 → 일반 작업(재의뢰)으로 바꾸기</button>` : `
     <div class="card">
       <h3>A/S 방문 <span class="r">${asList.length ? asList.length + '건' : ''}</span></h3>
       ${asList.map((x) => `<button class="pay" data-go="#job/${x.id}"><span class="grow"><b>${x.date ? esc(md(x.date)) : '날짜 미정'}</b> <span class="muted small">${esc((x.work || '').replace(/^A\/S:\s*/, '') || 'A/S')}</span></span>${statusPill(x.date ? x.status : 'A/S 대기')}</button>`).join('')}
       ${asList.length ? '' : '<div class="muted small">다시 가야 하는 일이 생기면 추가하세요. 날짜를 몰라도 돼요</div>'}
       <button class="add-line" id="j-addas">${ic('plus')} A/S 방문 추가</button>
+      ${asCandidates.length ? `<button class="link-btn" id="j-mkas">이 작업 자체가 A/S로 간 거예요 → 원래 작업 고르기</button>` : ''}
     </div>`}
 
     <div class="card">
@@ -1070,7 +1097,14 @@ function renderJob(id) {
   $('#j-review').onclick = () => reviewSheet(j);
   $('#j-addblog').onclick = () => blogSheet(j);
   $$('[data-blog]').forEach((b) => (b.onclick = () => blogSheet(j, Number(b.dataset.blog))));
-  $('#j-addas') && ($('#j-addas').onclick = () => openJobForm({ asOf: j }));  $('#j-del').onclick = async () => {
+  $('#j-addas') && ($('#j-addas').onclick = () => openJobForm({ asOf: j }));
+  $('#j-mkas') && ($('#j-mkas').onclick = () => pickAsParent(j, asCandidates, asList));
+  $('#j-unas') && ($('#j-unas').onclick = async () => {
+    if (!confirm('이 기록을 A/S가 아닌 일반 작업으로 바꿀까요?\n(같은 고객의 예전 작업이 있으면 재의뢰로 셉니다)')) return;
+    await save('jobs', { ...j, asOf: '' });
+    toast('일반 작업으로 바꿨어요');
+  });
+  $('#j-del').onclick = async () => {
     const msg = `이 작업을 삭제할까요?${(j.photos || []).length ? `\n사진 ${(j.photos || []).length}장도 함께 지워집니다.` : ''}${buys.length ? `\n연결된 매입 ${buys.length}건은 '공통 매입'으로 남습니다.` : ''}`;
     if (!confirm(msg)) return;
     try { await deletePhotos(j.photos || []); } catch (e) { console.warn(e); }

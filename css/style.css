@@ -208,6 +208,8 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .card + .link-btn { margin: -4px 0 14px; }
 /* 할 일 · 미팅 */
 .tk-tools { display: flex; gap: 6px; }
+.alert.task-chip { background: var(--card); color: var(--blue); border: 1px solid var(--blue-soft); }
+.alert.task-chip svg.i { width: 15px; height: 15px; }
 .task { display: flex; align-items: flex-start; gap: 10px; background: var(--card); border: 1px solid var(--line-2); border-radius: 14px; padding: 12px; margin-bottom: 8px; }
 .task.meet { border-left: 3px solid var(--blue); }
 .tk-check { flex: 0 0 26px; height: 26px; border-radius: 8px; border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; color: transparent; margin-top: 1px; }

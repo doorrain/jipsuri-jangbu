@@ -449,15 +449,19 @@ function tasksListSheet(mode = 'open', month = '') { // month: 'YYYY-MM' (일정
   const s = openSheet(`
     ${sheetHead('할 일 · 미팅')}
     <input class="input" id="tl-q" placeholder="제목·메모 검색 (초성도 돼요)" autocomplete="off" style="margin-bottom:10px" />
-    <div class="chips" data-chips="tlm" style="margin-bottom:10px">${[['open', '안 끝난 것'], ['overdue', '밀린 것'], ['meet', '미팅 기록'], ['all', '전체']].map(([k, l]) => `<button type="button" class="chip sm ${k === mode ? 'on' : ''}" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="chips" data-chips="tlm" style="margin-bottom:8px">${[['open', '안 끝난 것'], ['overdue', '밀린 것'], ['meet', '미팅 기록'], ['all', '전체']].map(([k, l]) => `<button type="button" class="chip sm ${k === mode ? 'on' : ''}" data-v="${k}">${l}</button>`).join('')}</div>
+    ${month ? `<div class="chips" style="margin-bottom:10px"><button type="button" class="chip sm on" id="tl-month">✓ ${Number(month.slice(5))}월만 보기</button></div>` : ''}
     <div id="tl-list"></div>`);
   s.parentElement.browse = true;
+  const monthOfTask = (x) => x.date || (x.createdAt ? ymd(new Date(x.createdAt)) : '');
+  let onlyMonth = !!month;
   const draw = () => {
     const q = $('#tl-q', s).value.trim();
     const t = today();
     const list = tasksAll()
       .filter(mineOk)
-      .filter((x) => (mode === 'open' ? !x.done : mode === 'overdue' ? !x.done && x.date && x.date < t && (!month || x.date.startsWith(month)) : mode === 'meet' ? x.kind === '미팅' : true))
+      .filter((x) => !onlyMonth || monthOfTask(x).startsWith(month))
+      .filter((x) => (mode === 'open' ? !x.done : mode === 'overdue' ? !x.done && x.date && x.date < t : mode === 'meet' ? x.kind === '미팅' : true))
       .filter((x) => !q || matches(`${x.title} ${x.memo} ${x.who}`, q))
       .sort((a, b) => (mode === 'meet' || mode === 'all' ? (b.date || '').localeCompare(a.date || '') : (a.date || '9999').localeCompare(b.date || '9999')));
     $('#tl-list', s).innerHTML = list.map((x) => taskCard(x, true)).join('') || '<div class="empty">없습니다</div>';
@@ -469,6 +473,12 @@ function tasksListSheet(mode = 'open', month = '') { // month: 'YYYY-MM' (일정
     if (!b) return;
     mode = b.dataset.v;
     $$('[data-chips="tlm"] .chip', s).forEach((x) => x.classList.toggle('on', x === b));
+    draw();
+  });
+  $('#tl-month', s) && ($('#tl-month', s).onclick = (e) => {
+    onlyMonth = !onlyMonth;
+    e.currentTarget.classList.toggle('on', onlyMonth);
+    e.currentTarget.textContent = `${onlyMonth ? '✓ ' : ''}${Number(month.slice(5))}월만 보기`;
     draw();
   });
   draw();
@@ -501,6 +511,8 @@ function renderSchedule() {
   const todayN = jobsOn(t).filter((j) => j.status !== '취소').length;
   const overdue = tasksAll().filter((x) => !x.done && x.date && x.date < t && inRange(x.date, mFrom, mTo) && mineOk(x)).sort(byDate);
   const undatedTasks = tasksAll().filter((x) => !x.done && !x.date && mineOk(x));
+  const monthTasks = tasksAll().filter((x) => mineOk(x) && inRange(x.date || madeOn(x), mFrom, mTo));
+  const monthTasksDone = monthTasks.filter((x) => x.done).length;
   const d = toDate(t);
 
   // 달력: 작업은 진한 점, 할 일·미팅은 연한 점
@@ -549,6 +561,7 @@ function renderSchedule() {
       <button class="alert gray" data-alert="month">${selMonth}월 작업 ${monthMain.length}건${monthMain.length ? ` · 완료 ${monthDone}` : ''}</button>
       ${monthRepeat.length ? `<button class="alert blue" data-alert="repeat">${selMonth}월 재의뢰 ${monthRepeat.length}건</button>` : ''}
       ${monthAS.length ? `<button class="alert blue" data-alert="as">${selMonth}월 A/S ${monthAS.length}건${monthASDone ? ` · 완료 ${monthASDone}` : ''}</button>` : ''}
+      <button class="alert task-chip" data-tk-month>${ic('list')} ${selMonth}월 할 일·미팅 ${monthTasks.length}건${monthTasks.length ? ` · 완료 ${monthTasksDone}` : ''}</button>
       ${undatedMonth.length ? `<button class="alert gray" data-alert="undated">${selMonth}월 날짜 미정 문의 ${undatedMonth.length}건</button>` : ''}
     </div>
     <div class="cal-head">
@@ -570,7 +583,8 @@ function renderSchedule() {
   bindTasks(view);
   $('[data-tk-new]').onclick = () => taskSheet(null, { date: sel });
   $('[data-tk-all]').onclick = () => tasksListSheet();
-  $('[data-tk-overdue]') && ($('[data-tk-overdue]').onclick = () => tasksListSheet('overdue', mFrom.slice(0, 7)));
+  $('[data-tk-month]').onclick = () => tasksListSheet('all', mFrom.slice(0, 7));
+  $('[data-tk-overdue]') &&($('[data-tk-overdue]').onclick = () => tasksListSheet('overdue', mFrom.slice(0, 7)));
   $('[data-mine]') && ($('[data-mine]').onclick = () => { ui.mine = !ui.mine; saveUi(); render(); });
   $$('[data-day]').forEach((b) => (b.onclick = () => { ui.sel = b.dataset.day; render(); }));
   // 매출·매입 요약을 누르면 그 달 장부로

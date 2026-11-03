@@ -4,7 +4,7 @@ import { loadScript } from './util.js';
 import { VAT_MODES, PAY_METHODS, BUY_CATS, SOURCES, PAYERS } from './seed.js';
 import {
   saleAmount, vatExtra, billed, paidSum, unpaid, payState, isReceivable, needsInvoice,
-  customerOf, custName, inRange, laborCalc, jobCost,
+  customerOf, custName, inRange, laborCalc, jobCost, isAS, isRepeat,
 } from './calc.js';
 
 const sum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
@@ -34,6 +34,12 @@ export function summarize(from, to) {
     });
   }
 
+  // 재의뢰·A/S: 일반 작업 중 예전 고객이 다시 맡긴 것 / A/S 방문
+  const mainJobs = jobs.filter((j) => !isAS(j));
+  const repeatJobs = mainJobs.filter(isRepeat);
+  const asJobs = jobs.filter(isAS);
+  const isDone = (j) => ['작업완료', '정산완료'].includes(j.status);
+
   const salesTotal = sum(sales, saleAmount);
   const buyTotal = sum(buys, (p) => p.amount);
   const feeTotal = sum(pays, (p) => p.fee); // 카드 수수료 (결제일 기준)
@@ -41,6 +47,13 @@ export function summarize(from, to) {
     feeTotal,
     from, to, jobs, sales, buys, pays, byVat, byMethod, byCat, byPayer, bySource, months,
     jobCount: jobs.length,
+    mainCount: mainJobs.length,
+    repeatJobs,
+    repeatSales: sum(repeatJobs, saleAmount),
+    asJobs,
+    asDone: asJobs.filter(isDone).length,
+    asPaid: asJobs.filter((j) => saleAmount(j) > 0).length,
+    asSales: sum(asJobs, saleAmount),
     salesTotal,
     vatExtraTotal: sum(sales, vatExtra),
     paidTotal: sum(pays, (p) => p.amount),
@@ -74,7 +87,12 @@ export async function exportExcel(r) {
     [`하이집수리 보고서  ${r.from} ~ ${r.to}`],
     [],
     ['항목', '금액(원)', '비고'],
-    ['작업 건수', r.jobCount, '취소 제외'],
+    ['작업 건수', r.mainCount, '취소·A/S 제외'],
+    ['재의뢰 건수', r.repeatJobs.length, '예전 고객이 다시 맡긴 작업'],
+    ['재의뢰 비율 (%)', r.mainCount ? Math.round((r.repeatJobs.length / r.mainCount) * 1000) / 10 : '', '재의뢰 ÷ 작업 건수 × 100'],
+    ['재의뢰 매출', r.repeatSales, ''],
+    ['A/S 방문 건수', r.asJobs.length, `완료 ${r.asDone}건 · 유상 ${r.asPaid}건`],
+    ['A/S 매출', r.asSales, '유상 A/S 금액'],
     ['매출 합계', r.salesTotal, '최종 금액 기준 (견적 − 할인 + 추가)'],
     ['할인 합계', r.jobs.reduce((s, j) => s + (Number(j.discount) || 0), 0), ''],
     ['추가 합계', r.jobs.reduce((s, j) => s + (Number(j.extra) || 0), 0), ''],
@@ -110,9 +128,9 @@ export async function exportExcel(r) {
   XLSX.utils.book_append_sheet(wb, sheet(XLSX, summary, [26, 16, 28, 14]), '요약');
 
   const jobsRows = [
-    ['작업일', '시간', '고객', '연락처', '현장 주소', '유입경로', '작업내역', '작업자', '상태', '견적금액', '할인', '추가', '할인·추가 내용', '최종 금액', '부가세', '받을 금액', '입금액', '미수금', '입금상태', '세금계산서', '발행일', '현장 매입', '현장 순이익', '후기', '블로그', '특이사항'],
+    ['작업일', '시간', '고객', '연락처', '현장 주소', '유입경로', '구분', '작업내역', '작업자', '상태', '견적금액', '할인', '추가', '할인·추가 내용', '최종 금액', '부가세', '받을 금액', '입금액', '미수금', '입금상태', '세금계산서', '발행일', '현장 매입', '현장 순이익', '후기', '블로그', '특이사항'],
     ...[...r.jobs].sort((a, b) => a.date.localeCompare(b.date)).map((j) => [
-      j.date, j.time || '', custName(cust(j)), cust(j)?.phone || '', j.address || '', j.source || '', j.work || '', j.worker || '', j.status,
+      j.date, j.time || '', custName(cust(j)), cust(j)?.phone || '', j.address || '', j.source || '', isAS(j) ? 'A/S' : isRepeat(j) ? '재의뢰' : '신규', j.work || '', j.worker || '', j.status,
       Number(j.amount) || 0, Number(j.discount) || 0, Number(j.extra) || 0,
       [j.discountNote && '할인: ' + j.discountNote, j.extraNote && '추가: ' + j.extraNote].filter(Boolean).join(' / '),
       saleAmount(j), vatLabel(j.vat), billed(j), paidSum(j), unpaid(j), payState(j),
@@ -120,7 +138,7 @@ export async function exportExcel(r) {
       jobCost(j.id), saleAmount(j) - jobCost(j.id), j.review?.text || '', (j.blogs || []).map((b) => b.url).join(' '), j.note || '',
     ]),
   ];
-  XLSX.utils.book_append_sheet(wb, sheet(XLSX, jobsRows, [11, 6, 18, 14, 28, 9, 28, 12, 9, 11, 10, 10, 24, 11, 11, 11, 11, 11, 9, 10, 11, 11, 11, 24, 30, 24]), '작업내역');
+  XLSX.utils.book_append_sheet(wb, sheet(XLSX, jobsRows, [11, 6, 18, 14, 28, 9, 7, 28, 12, 9, 11, 10, 10, 24, 11, 11, 11, 11, 11, 9, 10, 11, 11, 11, 24, 30, 24]), '작업내역');
 
   const payRows = [
     ['입금(결제)일', '고객', '현장 주소', '작업내역', '결제수단', '입금은행', '받은 금액', '카드 실입금', '카드 수수료', '부가세', '세금계산서'],

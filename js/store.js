@@ -18,7 +18,7 @@ const listeners = new Set();
 let sb = null;
 let channel = null;
 
-export const COLS = ['customers', 'jobs', 'purchases'];
+export const COLS = ['customers', 'jobs', 'purchases', 'tasks']; // tasks: 고객과 상관없는 할 일·미팅
 
 export const store = {
   mode: supabaseConfig && !forceLocal ? 'cloud' : 'local',
@@ -26,7 +26,7 @@ export const store = {
   ready: false,
   online: true,
   pending: 0,
-  state: { customers: [], jobs: [], purchases: [], settings: { ...DEFAULT_SETTINGS } },
+  state: { customers: [], jobs: [], purchases: [], tasks: [], settings: { ...DEFAULT_SETTINGS } },
 };
 export const supabase = () => sb;
 
@@ -80,7 +80,7 @@ function persist() {
 }
 function loadState(d) {
   store.state = {
-    customers: d.customers || [], jobs: d.jobs || [], purchases: d.purchases || [],
+    customers: d.customers || [], jobs: d.jobs || [], purchases: d.purchases || [], tasks: d.tasks || [],
     settings: withDefaults(d.settings),
   };
 }
@@ -110,7 +110,7 @@ async function fetchAll() {
     if (data.length < 1000) break;
   }
   if (gen !== fetchGen) return; // 더 나중에 시작한 불러오기가 있으면 그쪽 결과를 씀
-  const st = { customers: [], jobs: [], purchases: [], settings: withDefaults() };
+  const st = { customers: [], jobs: [], purchases: [], tasks: [], settings: withDefaults() };
   rows.forEach((r) => {
     if (r.col === 'settings') st.settings = withDefaults(r.data);
     else if (COLS.includes(r.col)) st[r.col].push(rowToObj(r));
@@ -144,6 +144,7 @@ async function refresh() {
     await flushOutbox();
     await fetchAll();
     store.online = true;
+    store.synced = true; // 서버에서 최신 목록을 한 번이라도 받았음
   } catch (e) {
     store.online = false;
     console.warn('클라우드 연결 실패, 저장된 데이터로 표시합니다', e);

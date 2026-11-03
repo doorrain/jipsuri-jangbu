@@ -34,10 +34,19 @@ export const customerOf = (job) => store.state.customers.find((c) => c.id === jo
 export const custName = (c) => (c ? [c.region, c.name].filter(Boolean).join(' · ') || '(이름 없음)' : '(고객 없음)');
 export const customerJobs = (cid) =>
   store.state.jobs.filter((j) => j.customerId === cid).sort((a, b) => (b.date || '9999').localeCompare(a.date || '9999'));
+// A/S 방문: 원래 작업(asOf)에 연결된 다시 가는 일정
+export const isAS = (j) => !!j?.asOf;
+export const asJobsOf = (id) => store.state.jobs.filter((x) => x.asOf === id).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+// 재의뢰: 이 고객이 이 작업 날짜 전에 맡긴 작업(취소·A/S 제외)이 있으면
+export function isRepeat(j) {
+  if (!j?.customerId || !j.date || isAS(j) || j.status === '취소') return false;
+  return store.state.jobs.some((x) => x.id !== j.id && x.customerId === j.customerId && !isAS(x) && x.status !== '취소' && x.date && x.date < j.date);
+}
+
 export function customerStats(cid) {
   const jobs = customerJobs(cid).filter((j) => j.status !== '취소');
   return {
-    count: jobs.length,
+    count: jobs.filter((j) => !isAS(j)).length, // A/S는 단골 횟수에 안 셈 (금액은 포함)
     total: jobs.reduce((s, j) => s + saleAmount(j), 0),
     last: jobs.map((j) => j.date).filter(Boolean).sort().pop() || '',
     unpaid: jobs.reduce((s, j) => s + (isReceivable(j) ? unpaid(j) : 0), 0),

@@ -198,6 +198,25 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .dots { display: flex; gap: 3px; height: 6px; }
 .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .day.sel .dots i { background: var(--card); }
+.dots i.t { background: var(--blue); opacity: .45; }
+.day.sel .dots i.t { background: var(--card); opacity: .55; }
+/* 재의뢰 · A/S */
+.kv.as-row { width: 100%; text-align: left; }
+.card.as-parent { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 14px; }
+.card.as-parent b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 할 일 · 미팅 */
+.tk-tools { display: flex; gap: 6px; }
+.task { display: flex; align-items: flex-start; gap: 10px; background: var(--card); border: 1px solid var(--line-2); border-radius: 14px; padding: 12px; margin-bottom: 8px; }
+.task.meet { border-left: 3px solid var(--blue); }
+.tk-check { flex: 0 0 26px; height: 26px; border-radius: 8px; border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; color: transparent; margin-top: 1px; }
+.tk-check svg.i { width: 16px; height: 16px; stroke-width: 2.6; }
+.task.done .tk-check { background: var(--ink); border-color: var(--ink); color: var(--card); }
+.tk-body { flex: 1; min-width: 0; text-align: left; display: flex; flex-direction: column; gap: 4px; }
+.tk-t { display: flex; align-items: center; gap: 6px; font-size: 15px; }
+.tk-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-body svg.i { width: 13px; height: 13px; vertical-align: -2px; }
+.tk-memo { font-size: 13px; color: var(--ink-2); white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.task.done .tk-t b, .task.done .tk-memo { color: var(--faint); text-decoration: line-through; }
 .month { display: grid; grid-template-columns: repeat(7, 1fr); background: var(--card); border-radius: var(--radius); padding: 8px; border: 1px solid var(--line-2); box-shadow: var(--shadow); }
 .month .wh { text-align: center; font-size: 12px; color: var(--muted); font-weight: 600; padding: 4px 0 6px; }
 .month .day { min-height: 54px; padding: 4px 0; }

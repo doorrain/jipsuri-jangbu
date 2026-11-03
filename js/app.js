@@ -8,7 +8,7 @@ import {
 } from './seed.js';
 import {
   saleAmount, finalAmount, vatExtra, billed, paidSum, unpaid, payState, isReceivable, needsInvoice, jobPurchases, jobCost, jobProfit, feeSum,
-  customerOf, custName, customerJobs, customerStats, laborCalc, inRange,
+  customerOf, custName, customerJobs, customerStats, laborCalc, inRange, isAS, asJobsOf, isRepeat,
 } from './calc.js';
 import { uploadPhotos, deletePhotos, photoUrls, downloadOne, downloadZip, usedBytes } from './photos.js';
 import { parseInquiry } from './parse.js';
@@ -27,11 +27,11 @@ const ui = Object.assign(
   (() => {
     try {
       const u = JSON.parse(localStorage.getItem(UI_KEY)) || {};
-      return Object.fromEntries(['cal', 'csort'].filter((k) => u[k]).map((k) => [k, u[k]]));
+      return Object.fromEntries(['cal', 'csort', 'mine'].filter((k) => u[k]).map((k) => [k, u[k]]));
     } catch (_) { return {}; }
   })(),
 );
-const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ cal: ui.cal, csort: ui.csort })); } catch (_) {} };
+const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ cal: ui.cal, csort: ui.csort, mine: ui.mine })); } catch (_) {} };
 const me = () => {
   try {
     const v = localStorage.getItem(ME_KEY) || '';
@@ -68,7 +68,7 @@ let draft = null; // { key, title, bg }
 function openSheet(html, onMount, draftKey) {
   const root = $('#sheet-root');
   if (draftKey && draft?.key === draftKey) return resumeDraft();
-  if (root.firstElementChild?.dirty) dismissSheet(); // 작성 중이던 창은 보관
+  if (root.firstElementChild?.dirty && !root.firstElementChild.browse) dismissSheet(); // 작성 중이던 창은 보관
   root.innerHTML = `<div class="sheet-bg"><div class="sheet"><div class="grab"></div>${html}</div></div>`;
   const bg = root.firstElementChild;
   bg.draftKey = draftKey || '';
@@ -76,9 +76,11 @@ function openSheet(html, onMount, draftKey) {
   bg.addEventListener('input', (e) => { if (e.isTrusted) bg.dirty = true; });
   bg.addEventListener('change', (e) => { if (e.isTrusted) bg.dirty = true; });
   bg.addEventListener('click', (e) => {
+    if (bg.browse) { if (e.target === bg) closeSheet(); return; } // 찾아보기 창은 언제든 닫힘
     if (e.target !== bg) {
       // 칩·버튼으로 고른 것도 작성한 것으로 봄
-      if (e.isTrusted && e.target.closest('.sheet button, .sheet input') && !e.target.closest('[data-close]')) bg.dirty = true;
+      // (입력 칸이 있는 창만. 메뉴처럼 고르기만 하는 창은 해당 없음)
+      if (e.isTrusted && e.target.closest('.sheet button, .sheet input') && !e.target.closest('[data-close]') && $('input:not([type=hidden]), textarea, select', bg)) bg.dirty = true;
       return;
     }
     // 입력 칸이 있는 창은 바깥(좌우 여백 포함)을 눌러도 닫지 않음. 목록·선택 창만 닫힘
@@ -86,7 +88,7 @@ function openSheet(html, onMount, draftKey) {
     else closeSheet();
   });
   $$('[data-close]', bg).forEach((b) => (b.onclick = () => {
-    if (bg.dirty && !confirm('작성 중인 내용을 지우고 닫을까요?')) return;
+    if (bg.dirty && !bg.browse && !confirm('작성 중인 내용을 지우고 닫을까요?')) return;
     closeSheet();
   }));
   onMount && onMount(bg.firstElementChild);
@@ -103,7 +105,7 @@ function closeSheet() {
 function dismissSheet() {
   const root = $('#sheet-root');
   const bg = root.firstElementChild;
-  if (bg?.dirty) {
+  if (bg?.dirty && !bg.browse) {
     draft = { key: bg.draftKey, title: $('.sh h2', bg)?.textContent || '작성 중인 내용', bg };
     bg.remove();
   }
@@ -211,6 +213,7 @@ subscribe(() => {
   // 입력 중인 시트는 그대로 두고 뒤 화면만 새로
   render();
   migratePayers();
+  migrateTasks().then(migrateAS);
 });
 
 function syncBadge() {
@@ -258,12 +261,200 @@ function jobCard(j, showDate = false) {
   return `<button class="job ${STATUS_CLASS[j.status] || ''}" data-go="#job/${j.id}">
     <div class="t">${showDate ? `${j.date ? md(j.date).replace(/\(.\)/, '') : '미정'}<small>${j.time ? j.time : j.date ? weekday(j.date) + '요일' : ''}</small>` : j.time ? `${j.time}<small>${+j.time.slice(0, 2) < 12 ? '오전' : '오후'}</small>` : '<span class="faint">시간</span><small>미정</small>'}</div>
     <div class="b">
-      <div class="n"><span class="nm">${esc(custName(c))}</span>${st.count >= 2 ? '<span class="badge-regular">단골</span>' : ''}${statusPill(j.status)}</div>
+      <div class="n"><span class="nm">${esc(custName(c))}</span>${st.count >= 2 ? '<span class="badge-regular">단골</span>' : ''}${isAS(j) ? '<span class="pill orange">A/S</span>' : isRepeat(j) ? '<span class="pill blue">재의뢰</span>' : ''}${statusPill(j.status)}</div>
       ${j.address ? `<div class="a">${esc(j.address)}</div>` : ''}
       ${j.work || j.worker ? `<div class="w">${esc(j.work || '')}${j.worker ? `<span class="muted">${j.work ? ' · ' : ''}${esc(j.worker)}</span>` : ''}</div>` : ''}
       ${money}
     </div>
   </button>`;
+}
+
+/* ---------- 할 일 · 미팅 (고객·매출과 따로 보관) ---------- */
+const TASK_KINDS = ['할 일', '미팅', '기타'];
+const TASK_WHO = ['LEE', 'BEE', '같이'];
+const tasksAll = () => store.state.tasks || [];
+// '내 것만': 내 이름이거나 '같이'·담당 미정인 것
+const mineOk = (x) => !ui.mine || !me() || !x.who || x.who === '같이' || x.who === me();
+const tasksOn = (d) => tasksAll().filter((x) => x.date === d && mineOk(x)).sort((a, b) => (a.done - b.done) || (a.time || '99').localeCompare(b.time || '99'));
+
+function taskCard(x, showDate = false) {
+  const sub = [showDate && (x.date ? md(x.date) : ''), x.time && timeLabel(x.time), x.who].filter(Boolean).join(' · ');
+  const job = x.jobId && store.state.jobs.find((j) => j.id === x.jobId);
+  return `<div class="task ${x.done ? 'done' : ''} ${x.kind === '미팅' ? 'meet' : ''}" data-tk-row="${x.id}">
+    <button class="tk-check" data-tk-done="${x.id}" aria-label="${x.done ? '안 끝남으로' : '끝남으로'}">${ic('check')}</button>
+    <button class="tk-body" data-tk="${x.id}">
+      <div class="tk-t"><span class="pill ${x.kind === '미팅' ? 'blue' : ''}">${esc(x.kind || '할 일')}</span><b>${esc(x.title)}</b></div>
+      ${sub || job ? `<div class="small muted">${esc(sub)}${job ? `${sub ? ' · ' : ''}${ic('pin')} ${esc(custName(customerOf(job)))}` : ''}</div>` : ''}
+      ${x.memo ? `<div class="tk-memo">${esc(x.memo)}</div>` : ''}
+    </button>
+  </div>`;
+}
+// 체크 칸은 바로 저장, 본문을 누르면 수정 창
+function bindTasks(root) {
+  $$('[data-tk-done]', root).forEach((b) => (b.onclick = async () => {
+    const x = tasksAll().find((y) => y.id === b.dataset.tkDone);
+    if (!x) return;
+    const done = !x.done;
+    b.closest('.task')?.classList.toggle('done', done); // 목록 창 안에서도 바로 보이게
+    await save('tasks', { ...x, done, doneAt: done ? today() : '' });
+  }));
+  $$('[data-tk]', root).forEach((b) => (b.onclick = () => taskSheet(tasksAll().find((y) => y.id === b.dataset.tk))));
+}
+
+function taskSheet(x, { date, jobId, fromJob } = {}) {
+  const isNew = !x;
+  const t = x ? { ...x } : {
+    id: newId('tk'), kind: '할 일', title: '', date: date ?? today(), time: '', who: me() || '', memo: '', done: false, jobId: jobId || '', createdBy: me(),
+  };
+  const draftKey = fromJob ? '' : isNew ? 'task-new' : `task-${t.id}`;
+  if (draftKey && draft?.key === draftKey) return resumeDraft();
+  const recentJobs = store.state.jobs
+    .filter((j) => j.status !== '취소' && (j.id === t.jobId || !j.date || j.date >= addDays(today(), -60)))
+    .sort((a, b) => (b.date || '9999').localeCompare(a.date || '9999'));
+  const s = openSheet(`
+    ${sheetHead(fromJob ? '할 일 · 미팅으로 옮기기' : isNew ? '할 일 · 미팅' : '할 일 · 미팅 수정')}
+    ${fromJob ? '<p class="muted small" style="margin-top:-6px">저장하면 이 기록은 작업·고객 목록에서 빠지고 할 일·미팅으로 옮겨져요.</p>' : ''}
+    <div class="field"><span>종류</span>${chipRow('tkind', TASK_KINDS, t.kind)}</div>
+    <label class="field"><span>제목</span><input id="tk-title" value="${esc(t.title)}" placeholder="예) 자재상 결제, 인테리어 업체 미팅" autocomplete="off" /></label>
+    <div class="field"><span>날짜 · 시간 <span class="faint">(날짜를 비우면 '날짜 없는 할 일')</span></span>
+      <div class="grid2"><input type="date" id="tk-date" value="${esc(t.date)}" />${timeField(t.time)}</div></div>
+    <div class="field"><span>누구 일</span>${chipRow('twho', TASK_WHO, t.who)}</div>
+    <label class="field"><span>메모 · 미팅 기록</span><textarea id="tk-memo" rows="5" placeholder="나눈 이야기, 정한 것, 다음에 할 일 등">${esc(t.memo)}</textarea></label>
+    ${fromJob ? '' : `<label class="field"><span>관련 현장 <span class="faint">(선택)</span></span><select id="tk-job"><option value="">없음</option>${recentJobs.map((j) => `<option value="${j.id}" ${j.id === t.jobId ? 'selected' : ''}>${esc(`${j.date ? md(j.date) : '미정'} ${custName(customerOf(j))}${j.work ? ' · ' + j.work : ''}`)}</option>`).join('')}</select></label>`}
+    ${isNew ? '' : `<label class="check"><input type="checkbox" id="tk-done" ${t.done ? 'checked' : ''} /> 끝남</label>`}
+    <div class="foot btns">${isNew || fromJob ? '' : '<button class="btn danger" id="tk-del" style="flex:0 0 96px">삭제</button>'}<button class="btn" id="tk-save">${fromJob ? '옮기기' : '저장'}</button></div>
+  `, null, draftKey);
+  bindChips(s, 'tkind');
+  bindChips(s, 'twho', null, true);
+  bindTimeField(s);
+  if (isNew && !fromJob) setTimeout(() => $('#tk-title', s)?.focus({ preventScroll: true }), 50);
+  $('#tk-save', s).onclick = async () => {
+    const title = $('#tk-title', s).value.trim();
+    if (!title) return toast('제목을 적어 주세요');
+    const done = $('#tk-done', s) ? $('#tk-done', s).checked : t.done;
+    const next = {
+      ...t, title, kind: chipVal(s, 'tkind') || '할 일', date: $('#tk-date', s).value, time: $('#jf-time', s).value,
+      who: chipVal(s, 'twho') || '', memo: $('#tk-memo', s).value.trim(), done, doneAt: done ? t.doneAt || today() : '',
+      jobId: fromJob ? '' : $('#tk-job', s)?.value || '',
+    };
+    if (fromJob) return finishJobToTask(fromJob, next);
+    await save('tasks', next);
+    closeSheet();
+    toast('저장했어요');
+  };
+  $('#tk-del', s) && ($('#tk-del', s).onclick = async () => {
+    if (!confirm('이 할 일·미팅을 삭제할까요?')) return;
+    await remove('tasks', t.id);
+    closeSheet();
+    toast('삭제했어요');
+  });
+}
+
+// 작업으로 잘못 넣은 할 일·미팅 → 할 일·미팅으로 옮김
+function jobToTaskDraft(j) {
+  const c = customerOf(j);
+  const name = c?.name || c?.region || '';
+  const work = (j.work || '').trim();
+  return {
+    id: 'tk' + j.id, kind: /미팅|회의|상담|방문|면담/.test(name + work) ? '미팅' : '할 일',
+    title: work && name && !work.includes(name) ? `${name} ${work}` : work || name || '할 일',
+    date: j.date || '', time: j.time || '', who: (j.worker || '').split(/[,·/]/)[0].trim() || j.createdBy || '',
+    memo: [j.note, j.review?.text].filter(Boolean).join('\n'), done: ['작업완료', '정산완료'].includes(j.status), doneAt: '', jobId: '', createdBy: j.createdBy || '',
+  };
+}
+async function finishJobToTask(j, task, { quiet = false } = {}) {
+  const c = customerOf(j);
+  if (!quiet && (j.photos || []).length && !confirm(`이 작업의 사진 ${j.photos.length}장은 할 일·미팅으로 옮겨지지 않고 지워져요. 계속할까요?`)) return;
+  await save('tasks', task);
+  if ((j.photos || []).length) { try { await deletePhotos(j.photos); } catch (e) { console.warn(e); } }
+  for (const p of store.state.purchases.filter((p) => p.jobId === j.id)) await save('purchases', { ...p, jobId: '' });
+  await remove('jobs', j.id);
+  // 이 기록 때문에 만들어진 고객이면 함께 정리
+  const leftover = c && !store.state.jobs.some((x) => x.customerId === c.id);
+  if (leftover && (quiet || confirm(`'${custName(c)}' 고객에게 남은 작업이 없어요. 고객 목록에서도 지울까요?`))) await remove('customers', c.id);
+  if (quiet) return;
+  closeSheet();
+  toast('할 일·미팅으로 옮겼어요');
+  go('#schedule');
+}
+
+// 처음 한 번: 작업으로 들어가 있던 '중문연구소 미팅'·'실업급여 신청'을 할 일·미팅으로 옮김
+let taskMigrating = false;
+async function migrateTasks() {
+  if (taskMigrating || !store.ready || store.state.settings.tasksMigrated1 || (store.mode === 'cloud' && !(store.user && store.online && store.synced))) return;
+  taskMigrating = true;
+  try {
+    const norm = (s) => String(s || '').replace(/\s+/g, '');
+    const moved = [];
+    for (const j of [...store.state.jobs]) {
+      const c = customerOf(j);
+      const text = norm([c?.name, c?.region, j.work, j.note].join(' '));
+      const kind = /중문연구소/.test(text) && /미팅/.test(text) ? '미팅' : /실업급여/.test(text) ? '할 일' : '';
+      // 돈이 오간 기록은 진짜 작업일 수 있어 건드리지 않음
+      if (!kind || saleAmount(j) || (j.payments || []).length || store.state.purchases.some((p) => p.jobId === j.id)) continue;
+      await finishJobToTask(j, { ...jobToTaskDraft(j), kind }, { quiet: true });
+      moved.push(jobToTaskDraft(j).title);
+    }
+    await saveSettings({ ...store.state.settings, tasksMigrated1: true });
+    if (moved.length) toast(`${moved.join(', ')} → 할 일·미팅으로 옮겼어요`);
+  } catch (e) {
+    console.warn('할 일 옮기기 실패', e);
+  } finally {
+    taskMigrating = false;
+  }
+}
+
+// 처음 한 번: 예전 '재방문 필요' 체크 → 그 작업에 연결된 'A/S 대기'(날짜 미정 A/S 방문)로
+let asMigrating = false;
+async function migrateAS() {
+  if (asMigrating || !store.ready || store.state.settings.asMigrated1 || (store.mode === 'cloud' && !(store.user && store.online && store.synced))) return;
+  asMigrating = true;
+  try {
+    const flagged = store.state.jobs.filter((j) => j.revisit);
+    for (const j of flagged) {
+      const id = 'as' + j.id; // 두 기기가 동시에 해도 하나만 생기게
+      if (!store.state.jobs.some((x) => x.id === id)) {
+        await save('jobs', { ...blankJob(j.customerId), id, asOf: j.id, date: '', status: '문의', address: j.address || '', source: j.source || '', work: 'A/S: ', worker: j.worker || '', createdBy: j.createdBy || '' });
+      }
+      await save('jobs', { ...store.state.jobs.find((x) => x.id === j.id), revisit: false });
+    }
+    await saveSettings({ ...store.state.settings, asMigrated1: true });
+    if (flagged.length) toast(`예전 '재방문 필요' ${flagged.length}건을 A/S 대기로 옮겼어요`);
+  } catch (e) {
+    console.warn('A/S 옮기기 실패', e);
+  } finally {
+    asMigrating = false;
+  }
+}
+
+// 할 일·미팅 전체 보기 + 검색 (미팅 기록 찾기)
+function tasksListSheet(mode = 'open') {
+  const s = openSheet(`
+    ${sheetHead('할 일 · 미팅')}
+    <input class="input" id="tl-q" placeholder="제목·메모 검색 (초성도 돼요)" autocomplete="off" style="margin-bottom:10px" />
+    <div class="chips" data-chips="tlm" style="margin-bottom:10px">${[['open', '안 끝난 것'], ['overdue', '밀린 것'], ['meet', '미팅 기록'], ['all', '전체']].map(([k, l]) => `<button type="button" class="chip sm ${k === mode ? 'on' : ''}" data-v="${k}">${l}</button>`).join('')}</div>
+    <div id="tl-list"></div>`);
+  s.parentElement.browse = true;
+  const draw = () => {
+    const q = $('#tl-q', s).value.trim();
+    const t = today();
+    const list = tasksAll()
+      .filter(mineOk)
+      .filter((x) => (mode === 'open' ? !x.done : mode === 'overdue' ? !x.done && x.date && x.date < t : mode === 'meet' ? x.kind === '미팅' : true))
+      .filter((x) => !q || matches(`${x.title} ${x.memo} ${x.who}`, q))
+      .sort((a, b) => (mode === 'meet' || mode === 'all' ? (b.date || '').localeCompare(a.date || '') : (a.date || '9999').localeCompare(b.date || '9999')));
+    $('#tl-list', s).innerHTML = list.map((x) => taskCard(x, true)).join('') || '<div class="empty">없습니다</div>';
+    bindTasks($('#tl-list', s));
+  };
+  $('#tl-q', s).addEventListener('input', draw);
+  $('[data-chips="tlm"]', s).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-v]');
+    if (!b) return;
+    mode = b.dataset.v;
+    $$('[data-chips="tlm"] .chip', s).forEach((x) => x.classList.toggle('on', x === b));
+    draw();
+  });
+  draw();
 }
 
 function renderSchedule() {
@@ -274,24 +465,31 @@ function renderSchedule() {
   const selMonth = toDate(sel).getMonth() + 1;
   const jobsAll = activeJobs();
   const monthJobs = jobsAll.filter((j) => inRange(j.date, mFrom, mTo));
-  const monthDone = monthJobs.filter((j) => ['작업완료', '정산완료'].includes(j.status)).length;
+  const monthMain = monthJobs.filter((j) => !isAS(j)); // A/S는 따로 셈
+  const monthDone = monthMain.filter((j) => ['작업완료', '정산완료'].includes(j.status)).length;
+  const monthRepeat = monthMain.filter(isRepeat);
+  const monthAS = monthJobs.filter(isAS);
+  const monthASDone = monthAS.filter((j) => ['작업완료', '정산완료'].includes(j.status)).length;
+  const asWait = jobsAll.filter((j) => isAS(j) && !j.date);
   const monthSales = monthJobs.reduce((s, j) => s + saleAmount(j), 0);
   const monthBuy = store.state.purchases.filter((p) => inRange(p.date, mFrom, mTo)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const recv = jobsAll.filter(isReceivable);
   const inv = jobsAll.filter(needsInvoice);
-  const revisit = monthJobs.filter((j) => j.revisit); // 보고 있는 달의 재방문만
-  const undated = jobsAll.filter((j) => !j.date && j.status === '문의');
+  const undated = jobsAll.filter((j) => !j.date && j.status === '문의' && !isAS(j));
   const todayN = jobsOn(t).filter((j) => j.status !== '취소').length;
+  const overdue = tasksAll().filter((x) => !x.done && x.date && x.date < t && mineOk(x)).sort(byDate);
+  const undatedTasks = tasksAll().filter((x) => !x.done && !x.date && mineOk(x));
   const d = toDate(t);
 
-  // 달력
+  // 달력: 작업은 진한 점, 할 일·미팅은 연한 점
   let cal = '';
   const countOn = (ds) => jobsOn(ds).filter((j) => j.status !== '취소').length;
   const dayCell = (ds, extra = '') => {
-    const n = countOn(ds);
+    const n = Math.min(countOn(ds), 3);
+    const tn = Math.min(tasksOn(ds).length, 4 - n, 2);
     return `<button class="day ${ds === t ? 'today' : ''} ${ds === sel ? 'sel' : ''} ${toDate(ds).getDay() === 0 ? 'sun' : ''} ${extra}" data-day="${ds}">
       ${extra.includes('m') ? '' : `<span class="w">${weekday(ds)}</span>`}<span class="d">${toDate(ds).getDate()}</span>
-      <span class="dots">${'<i></i>'.repeat(Math.min(n, 3))}</span></button>`;
+      <span class="dots">${'<i></i>'.repeat(n)}${'<i class="t"></i>'.repeat(Math.max(tn, 0))}</span></button>`;
   };
   if (ui.cal === 'week') {
     const s = addDays(sel, -toDate(sel).getDay());
@@ -308,6 +506,7 @@ function renderSchedule() {
     cal = `<div class="month">${['일', '월', '화', '수', '목', '금', '토'].map((w) => `<div class="wh">${w}</div>`).join('')}${cells.join('')}</div>`;
   }
   const dayJobs = jobsOn(sel);
+  const dayTasks = tasksOn(sel);
   const sd = toDate(sel);
 
   view.innerHTML = `
@@ -321,10 +520,13 @@ function renderSchedule() {
       <button class="kpi" data-ledger="buys" style="text-align:left"><div class="l">${selMonth}월 매입</div><div class="v">${short(monthBuy)}</div></button>
     </section>
     <div class="alerts">
+      ${overdue.length ? `<button class="alert orange" data-tk-overdue>밀린 할 일 ${overdue.length}건</button>` : ''}
       ${recv.length ? `<button class="alert red" data-alert="recv">미수 ${recv.length}건 · ${num(recv.reduce((s, j) => s + unpaid(j), 0))}원</button>` : ''}
       ${inv.length ? `<button class="alert orange" data-alert="inv">계산서 미발행 ${inv.length}건</button>` : ''}
-      ${revisit.length ? `<button class="alert blue" data-alert="revisit">${selMonth}월 재방문 ${revisit.length}건</button>` : ''}
-      <button class="alert gray" data-alert="month">${selMonth}월 작업 ${monthJobs.length}건${monthJobs.length ? ` · 완료 ${monthDone}` : ''}</button>
+      ${asWait.length ? `<button class="alert orange" data-alert="asWait">A/S 대기 ${asWait.length}건</button>` : ''}
+      <button class="alert gray" data-alert="month">${selMonth}월 작업 ${monthMain.length}건${monthMain.length ? ` · 완료 ${monthDone}` : ''}</button>
+      ${monthRepeat.length ? `<button class="alert blue" data-alert="repeat">${selMonth}월 재의뢰 ${monthRepeat.length}건</button>` : ''}
+      ${monthAS.length ? `<button class="alert blue" data-alert="as">${selMonth}월 A/S ${monthAS.length}건${monthASDone ? ` · 완료 ${monthASDone}` : ''}</button>` : ''}
       ${undated.length ? `<button class="alert gray" data-alert="undated">날짜 미정 문의 ${undated.length}건</button>` : ''}
     </div>
     <div class="cal-head">
@@ -337,8 +539,17 @@ function renderSchedule() {
     ${cal}
     <div class="sec-title">${fullDate(sel).replace(/^\d+년 /, '')}<span class="r">${dayJobs.length ? dayJobs.length + '건' : ''}</span></div>
     ${dayJobs.length ? dayJobs.map((j) => jobCard(j)).join('') : `<div class="empty">일정이 없습니다<br><span class="small faint">오른쪽 아래 ＋ 버튼으로 바로 등록하세요</span></div>`}
+    <div class="sec-title">할 일 · 미팅<span class="r tk-tools">${me() ? `<button class="chip sm ${ui.mine ? 'on' : ''}" data-mine>${ui.mine ? '✓ ' : ''}내 것만</button>` : ''}<button class="chip sm" data-tk-all>${ic('search')} 전체·검색</button></span></div>
+    ${dayTasks.map((x) => taskCard(x)).join('')}
+    <button class="add-line" data-tk-new style="margin-top:${dayTasks.length ? 8 : 0}px">${ic('plus')} ${sel === t ? '오늘' : md(sel)} 할 일 · 미팅 추가</button>
+    ${undatedTasks.length ? `<div class="sec-title">날짜 없는 할 일<span class="r">${undatedTasks.length}건</span></div>${undatedTasks.map((x) => taskCard(x, true)).join('')}` : ''}
     ${undated.length ? `<div class="sec-title">날짜 미정 문의<span class="r">${undated.length}건</span></div>${undated.map((j) => jobCard(j, true)).join('')}` : ''}
   `;
+  bindTasks(view);
+  $('[data-tk-new]').onclick = () => taskSheet(null, { date: sel });
+  $('[data-tk-all]').onclick = () => tasksListSheet();
+  $('[data-tk-overdue]') && ($('[data-tk-overdue]').onclick = () => tasksListSheet('overdue'));
+  $('[data-mine]') && ($('[data-mine]').onclick = () => { ui.mine = !ui.mine; saveUi(); render(); });
   $$('[data-day]').forEach((b) => (b.onclick = () => { ui.sel = b.dataset.day; render(); }));
   // 매출·매입 요약을 누르면 그 달 장부로
   $$('[data-ledger]').forEach((b) => (b.onclick = () => { ui.lt = b.dataset.ledger; ui.lm = sel; go('#ledger'); }));
@@ -353,9 +564,11 @@ function renderSchedule() {
     const map = {
       recv: ['미수금', recv],
       inv: ['세금계산서 미발행', inv],
-      revisit: [`${selMonth}월 재방문`, revisit],
+      repeat: [`${selMonth}월 재의뢰 (예전 고객이 다시 맡긴 작업)`, monthRepeat],
+      as: [`${selMonth}월 A/S 방문`, monthAS],
+      asWait: ['A/S 대기 (날짜 정해야 함)', asWait],
       undated: ['날짜 미정 문의', undated],
-      month: [`${selMonth}월 작업`, monthJobs],
+      month: [`${selMonth}월 작업`, monthMain],
     };
     jobListSheet(map[k][0], map[k][1]);
   }));
@@ -408,22 +621,25 @@ function setTimeField(s, v) {
   mm.disabled = false;
 }
 
-function openJobForm({ job, customerId, prefill, afterSave } = {}) {
+function openJobForm({ job, customerId, prefill, afterSave, asOf } = {}) {
   const isNew = !job;
-  const draftKey = isNew ? (customerId || prefill ? '' : 'job-new') : `job-${job.id}`;
+  const draftKey = isNew ? (asOf ? `as-${asOf.id}` : customerId || prefill ? '' : 'job-new') : `job-${job.id}`;
   if (draftKey && draft?.key === draftKey) return resumeDraft();
-  const j = job ? JSON.parse(JSON.stringify(job)) : blankJob(customerId);
+  const j = job ? JSON.parse(JSON.stringify(job)) : blankJob(asOf ? asOf.customerId : customerId);
   let cust = store.state.customers.find((c) => c.id === j.customerId) || null;
   if (isNew && cust) {
     j.address = cust.address || '';
     j.source = '';
   }
+  // A/S 방문: 원래 작업의 주소·유입경로를 이어받고, 날짜는 정해지면 넣음
+  if (isNew && asOf) Object.assign(j, { asOf: asOf.id, address: asOf.address || j.address, source: asOf.source || '', date: '', work: 'A/S: ', worker: asOf.worker || '' });
   // 작업자 버튼: LEE + 인건비에 등록한 사람 + 예전에 적은 이름 (BEE는 현장 작업자가 아니라 기본 목록에서 뺌)
   const workerNames = [...new Set(['LEE', ...(store.state.settings.workers || []).map((w) => w.name), ...store.state.jobs.map((x) => x.worker)].filter(Boolean))];
 
   const s = openSheet(`
-    ${sheetHead(isNew ? '새 일정' : '일정 수정')}
-    ${isNew ? `<div class="paste-box" id="pb">
+    ${sheetHead(isAS(j) ? (isNew ? 'A/S 방문 추가' : 'A/S 방문 수정') : isNew ? '새 일정' : '일정 수정')}
+    ${isNew && asOf ? `<p class="muted small" style="margin-top:-6px">${esc(md(asOf.date) || '')} ${esc(asOf.work || '')} 작업의 A/S예요. 날짜를 모르면 '미정'으로 두면 'A/S 대기'에 남아요. 무상이면 금액은 비워 두세요.</p>` : ''}
+    ${isNew && !asOf ? `<div class="paste-box" id="pb">
       <div class="btns"><button type="button" class="btn sm ghost" id="pb-btn" style="background:var(--card)">${ic('clip')} 글자 붙여넣기</button>
       <button type="button" class="btn sm ghost" id="pb-img" style="background:var(--card)">${ic('camera')} 캡처로 채우기</button></div>
       <input type="file" id="pb-file" accept="image/*" hidden />
@@ -599,8 +815,8 @@ function openJobForm({ job, customerId, prefill, afterSave } = {}) {
   }
   renderCust();
 
-  // 붙여넣기
-  if (isNew) {
+  // 붙여넣기 (A/S 방문은 붙여넣기 칸 없음)
+  if (isNew && !asOf) {
     const applyParse = (text) => {
       const p = parseInquiry(text);
       if (!p.raw) return;
@@ -728,6 +944,9 @@ function renderJob(id) {
   const buys = jobPurchases(j.id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const cost = jobCost(j.id);
   const others = customerJobs(j.customerId).filter((x) => x.id !== j.id);
+  const asParent = isAS(j) ? store.state.jobs.find((x) => x.id === j.asOf) : null;
+  const asList = asJobsOf(j.id);
+  const linkedTasks = tasksAll().filter((x) => x.jobId === j.id).sort((a, b) => (a.done - b.done) || (b.date || '').localeCompare(a.date || ''));
   const photos = (j.photos || []).filter((p) => ui.stage === '전체' || p.stage === ui.stage);
   const ti = j.taxInvoice || {};
   const rv = j.review || {};
@@ -801,18 +1020,33 @@ function renderJob(id) {
       <button class="add-line" id="j-addblog">${ic('plus')} 블로그 링크 추가</button>
     </div>
 
+    ${asParent ? `<button class="card as-parent" data-go="#job/${asParent.id}"><span class="pill orange">A/S</span> 원래 작업: <b>${esc(md(asParent.date) || '날짜 미정')} ${esc(asParent.work || '')}</b> ${ic('right')}</button>` : `
+    <div class="card">
+      <h3>A/S 방문 <span class="r">${asList.length ? asList.length + '건' : ''}</span></h3>
+      ${asList.map((x) => `<button class="pay" data-go="#job/${x.id}"><span class="grow"><b>${x.date ? esc(md(x.date)) : '날짜 미정'}</b> <span class="muted small">${esc((x.work || '').replace(/^A\/S:\s*/, '') || 'A/S')}</span></span>${statusPill(x.date ? x.status : 'A/S 대기')}</button>`).join('')}
+      ${asList.length ? '' : '<div class="muted small">다시 가야 하는 일이 생기면 추가하세요. 날짜를 몰라도 돼요</div>'}
+      <button class="add-line" id="j-addas">${ic('plus')} A/S 방문 추가</button>
+    </div>`}
+
     <div class="card">
       <h3>특이사항</h3>
-      <label class="check"><input type="checkbox" id="j-revisit" ${j.revisit ? 'checked' : ''} /> 재방문 필요 (A/S·추가 작업)</label>
       ${j.note ? `<div class="note" style="margin-top:6px">${esc(j.note)}</div>` : '<div class="muted small">메모는 [수정]에서 입력해요</div>'}
     </div>
+
+    <div class="sec-title">이 현장 관련 할 일 · 미팅<span class="r">${linkedTasks.length ? linkedTasks.length + '건' : ''}</span></div>
+    ${linkedTasks.map((x) => taskCard(x, true)).join('')}
+    <button class="add-line" id="j-addtask" style="margin-top:${linkedTasks.length ? 8 : 0}px">${ic('plus')} 이 현장 할 일 · 미팅 추가</button>
 
     ${others.length ? `<div class="sec-title">이 고객의 다른 작업<span class="r">${others.length}건</span></div>${others.slice(0, 5).map((x) => jobCard(x, true)).join('')}` : ''}
     <div class="btns" style="margin-top:16px">
       <button class="btn line" id="j-again">${ic('plus')} 이 고객 새 작업</button>
       <button class="btn danger" id="j-del">${ic('trash')} 삭제</button>
     </div>
+    <button class="btn ghost block" id="j-totask" style="margin-top:8px">${ic('list')} 작업이 아니라 할 일·미팅이에요 → 옮기기</button>
   `;
+  bindTasks(view);
+  $('#j-addtask').onclick = () => taskSheet(null, { date: '', jobId: j.id });
+  $('#j-totask').onclick = () => taskSheet(jobToTaskDraft(j), { fromJob: j });
   hydrateImgs(view);
   $('[data-back]').onclick = () => (history.length > 1 ? history.back() : go('#schedule'));
   $('#j-edit').onclick = () => openJobForm({ job: j });
@@ -836,8 +1070,7 @@ function renderJob(id) {
   $('#j-review').onclick = () => reviewSheet(j);
   $('#j-addblog').onclick = () => blogSheet(j);
   $$('[data-blog]').forEach((b) => (b.onclick = () => blogSheet(j, Number(b.dataset.blog))));
-  $('#j-revisit').onchange = (e) => save('jobs', { ...j, revisit: e.target.checked });
-  $('#j-del').onclick = async () => {
+  $('#j-addas') && ($('#j-addas').onclick = () => openJobForm({ asOf: j }));  $('#j-del').onclick = async () => {
     const msg = `이 작업을 삭제할까요?${(j.photos || []).length ? `\n사진 ${(j.photos || []).length}장도 함께 지워집니다.` : ''}${buys.length ? `\n연결된 매입 ${buys.length}건은 '공통 매입'으로 남습니다.` : ''}`;
     if (!confirm(msg)) return;
     try { await deletePhotos(j.photos || []); } catch (e) { console.warn(e); }
@@ -1501,7 +1734,15 @@ function renderReport() {
       ${r.months.length > 1 ? `<hr class="sep" />${r.months.filter((m) => m.sales || m.buys).map((m) => `<div class="kv"><span class="muted">${Number(m.key.slice(5))}월 <span class="faint small">매출 ${num(m.sales)} · 매입 ${num(m.buys)}</span></span><span class="v">${m.sales ? pct(m.buys, m.sales) : '–'}</span></div>`).join('')}` : ''}
     </div>` : ''}
     <div class="card">
-      <div class="kv"><span class="muted">작업 건수</span><span class="v">${r.jobCount}건</span></div>
+      <h3>재의뢰 · A/S</h3>
+      <div class="kv"><span class="muted">작업 <span class="faint small">(A/S 제외)</span></span><span class="v">${r.mainCount}건</span></div>
+      <button class="kv as-row" data-rp-list="repeat"><span class="muted">재의뢰 <span class="faint small">예전 고객이 다시 맡김</span></span><span class="v">${r.repeatJobs.length}건${r.mainCount ? ` <span class="faint small">(${pct(r.repeatJobs.length, r.mainCount)})</span>` : ''}</span></button>
+      ${r.repeatSales ? `<div class="kv"><span class="muted">재의뢰 매출</span><span class="v">${won(r.repeatSales)}${r.salesTotal ? ` <span class="faint small">(매출의 ${pct(r.repeatSales, r.salesTotal)})</span>` : ''}</span></div>` : ''}
+      <button class="kv as-row" data-rp-list="as"><span class="muted">A/S 방문</span><span class="v">${r.asJobs.length}건${r.asJobs.length ? ` <span class="faint small">완료 ${r.asDone} · 유상 ${r.asPaid}</span>` : ''}</span></button>
+      ${r.asSales ? `<div class="kv"><span class="muted">유상 A/S 매출</span><span class="v">${won(r.asSales)}</span></div>` : ''}
+    </div>
+    <div class="card">
+      <div class="kv"><span class="muted">전체 방문 <span class="faint small">(작업 + A/S)</span></span><span class="v">${r.jobCount}건</span></div>
       <div class="kv"><span class="muted">입금 합계</span><span class="v">${won(r.paidTotal)}</span></div>
       ${r.feeTotal ? `<div class="kv"><span class="muted">카드 수수료 (차익에서 뺌)</span><span class="v">${won(r.feeTotal)}</span></div>` : ''}
       ${r.vatExtraTotal ? `<div class="kv"><span class="muted">부가세 별도로 받을 금액</span><span class="v">${won(r.vatExtraTotal)}</span></div>` : ''}
@@ -1524,6 +1765,7 @@ function renderReport() {
     if (ui.rp !== 'custom') [ui.rfrom, ui.rto] = periodOf(ui.rp);
     render();
   });
+  $$('[data-rp-list]').forEach((b) => (b.onclick = () => (b.dataset.rpList === 'repeat' ? jobListSheet('재의뢰 작업', r.repeatJobs) : jobListSheet('A/S 방문', r.asJobs))));
   const fi = $('#r-from'), ti = $('#r-to');
   const onRange = () => { if (fi.value && ti.value && fi.value <= ti.value) { ui.rfrom = fi.value; ui.rto = ti.value; render(); } };
   fi.onchange = onRange;
@@ -1609,9 +1851,11 @@ $('#fab').onclick = () => {
     <div class="list">
       <button class="li" data-q="job"><div class="avatar" style="background:var(--accent-soft);color:var(--accent)">${ic('cal')}</div><div class="grow"><div class="t1">새 일정 · 문의</div><div class="t2">고객, 날짜, 유입경로만 넣으면 끝</div></div></button>
       <button class="li" data-q="buy"><div class="avatar">${ic('wallet')}</div><div class="grow"><div class="t1">매입 기록</div><div class="t2">자재, 공구, 인건비 등 쓴 돈</div></div></button>
+      <button class="li" data-q="task"><div class="avatar" style="background:var(--blue-soft);color:var(--blue)">${ic('list')}</div><div class="grow"><div class="t1">할 일 · 미팅</div><div class="t2">고객과 상관없는 일정, 미팅 기록</div></div></button>
     </div>`, (s) => {
     $('[data-q="job"]', s).onclick = () => openJobForm();
     $('[data-q="buy"]', s).onclick = () => purchaseSheet();
+    $('[data-q="task"]', s).onclick = () => taskSheet(null, { date: route().r === 'schedule' ? ui.sel : today() });
   });
 };
 

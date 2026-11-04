@@ -1451,7 +1451,7 @@ function photoAddSheet(j) {
   const s = openSheet(`
     ${sheetHead('사진 추가')}
     <p class="muted small" style="margin-top:-6px">어떤 사진인지 고르면 사진 선택 창이 열려요. 여러 장 한 번에 고를 수 있어요.</p>
-    <div class="grid2">${PHOTO_STAGES.map((st) => `<button class="btn ghost" data-st="${st}" style="height:64px">${st}</button>`).join('')}</div>
+    <div class="grid2">${['문의', '작업 전', '후기', '작업 중', '기타', '작업 후'].map((st) => `<button class="btn ghost" data-st="${st}" style="height:64px">${st}</button>`).join('')}</div>
     <p class="muted small">사진은 자동으로 줄여서(장당 약 300KB) 저장돼요. 원본은 휴대폰 갤러리에 그대로 있어요.</p>`);
   $$('[data-st]', s).forEach((b) => (b.onclick = () => {
     const input = $('#j-file');

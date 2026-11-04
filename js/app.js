@@ -1414,6 +1414,38 @@ function blogSheet(j, idx = -1) {
 }
 
 /* ---------- 사진 ---------- */
+// 사진 올릴 순서 정하기: 갤러리에서 누른 순서는 웹앱이 알 수 없어, 고른 사진을 여기서 순서대로 누름
+function photoOrderSheet(files) {
+  return new Promise((resolve) => {
+    const urls = files.map((f) => URL.createObjectURL(f));
+    const s = openSheet(`
+      ${sheetHead('올릴 순서 정하기')}
+      <p class="muted small" style="margin-top:-6px">올릴 순서대로 사진을 누르면 1, 2, 3 번호가 붙어요. 다시 누르면 번호가 빠져요. 번호가 없는 사진은 맨 뒤에 올라가요.</p>
+      <div class="photos ph-order">${urls.map((u, i) => `<button type="button" data-i="${i}"><img src="${u}" alt="" /><span class="no" hidden></span></button>`).join('')}</div>
+      <div class="foot btns"><button class="btn ghost" id="po-reset" style="flex:0 0 112px">번호 지우기</button><button class="btn" id="po-go">${files.length}장 올리기</button></div>`);
+    s.parentElement.dirty = true; // 바깥을 잘못 눌러도 고른 사진이 사라지지 않게
+    let order = [];
+    const draw = () => $$('[data-i]', s).forEach((b) => {
+      const n = order.indexOf(Number(b.dataset.i));
+      b.classList.toggle('on', n >= 0);
+      $('.no', b).hidden = n < 0;
+      $('.no', b).textContent = n + 1;
+    });
+    $$('[data-i]', s).forEach((b) => (b.onclick = () => {
+      const i = Number(b.dataset.i);
+      order = order.includes(i) ? order.filter((x) => x !== i) : [...order, i];
+      draw();
+    }));
+    $('#po-reset', s).onclick = () => { order = []; draw(); };
+    $('#po-go', s).onclick = () => {
+      const rest = files.map((_, i) => i).filter((i) => !order.includes(i));
+      closeSheet();
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      resolve([...order, ...rest].map((i) => files[i]));
+    };
+  });
+}
+
 function photoAddSheet(j) {
   if (store.mode === 'cloud' && !navigator.onLine) return toast('사진은 인터넷이 연결됐을 때 올릴 수 있어요');
   const s = openSheet(`
@@ -1425,9 +1457,10 @@ function photoAddSheet(j) {
     const input = $('#j-file');
     input.value = '';
     input.onchange = async () => {
-      const files = [...input.files];
+      const picked = [...input.files];
       closeSheet();
-      if (!files.length) return;
+      if (!picked.length) return;
+      const files = picked.length > 1 ? await photoOrderSheet(picked) : picked;
       try {
         const added = await uploadPhotos(j.id, files, b.dataset.st, (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
         const fresh = store.state.jobs.find((x) => x.id === j.id) || j;

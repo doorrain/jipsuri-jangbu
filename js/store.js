@@ -167,8 +167,10 @@ async function onSignedIn(user) {
 
 async function initCloud() {
   const { createClient } = await import(SUPABASE_JS);
+  // 견적 앱·조색 앱도 같은 주소(doorrain.github.io)·같은 Supabase를 써서, 기본 저장 칸을 쓰면
+  // 로그인 정보를 공유하다가 서로 갱신이 충돌해 로그인이 풀립니다. 이 앱만의 칸에 따로 보관합니다.
   sb = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
-    auth: { persistSession: true, autoRefreshToken: true },
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: 'hyeonjang-auth' },
   });
   store.pending = readJSON(OUTBOX_KEY, []).length;
   const { data } = await sb.auth.getSession();
@@ -228,22 +230,19 @@ function flushOutbox() {
   return flushing;
 }
 
+// 화면·기기에는 바로 저장하고, 서버로 올리는 건 뒤에서 진행 (인터넷이 느려도 저장 창이 바로 닫히도록)
 async function write(op) {
   applyOp(op);
   remember(op);
   persist();
-  emit();
   if (store.mode === 'cloud') {
     queue(op);
-    try {
-      await flushOutbox();
-      store.online = true;
-    } catch (e) {
-      store.online = false;
-      console.warn('나중에 다시 올립니다', e);
-    }
-    emit();
+    flushOutbox()
+      .then(() => { store.online = true; })
+      .catch((e) => { store.online = false; console.warn('나중에 다시 올립니다', e); })
+      .finally(emit);
   }
+  emit();
 }
 
 /* ---------- 공개 함수 ---------- */
@@ -260,7 +259,8 @@ export async function initStore() {
 }
 
 export async function login(email, password) {
-  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (!sb) throw new Error('NO_CLIENT');
+  const { error } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
   if (error) throw error;
 }
 export async function logout() {

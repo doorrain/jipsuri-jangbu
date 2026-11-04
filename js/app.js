@@ -232,17 +232,41 @@ function renderLogin() {
       <h1>하이집수리 현장장부</h1>
       <p class="lead">견적 앱과 같은 계정으로 로그인하세요.</p>
       <label class="field"><span>이메일</span><input id="lg-email" type="email" autocomplete="username" /></label>
-      <label class="field"><span>비밀번호</span><input id="lg-pw" type="password" autocomplete="current-password" /></label>
+      <label class="field"><span>비밀번호</span><div class="pw-wrap"><input id="lg-pw" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" /><button type="button" class="pw-eye" id="lg-eye">보기</button></div></label>
+      <div class="small" id="lg-msg" style="color:var(--red);min-height:18px;margin:-4px 0 10px"></div>
       <button class="btn block" id="lg-btn">로그인</button>
       <p class="hint">한 번 로그인하면 계속 유지됩니다.</p>
     </div>`;
-  $('#lg-btn').onclick = async () => {
+  $('#lg-email').setAttribute('autocapitalize', 'off');
+  $('#lg-eye').onclick = () => {
+    const pw = $('#lg-pw');
+    pw.type = pw.type === 'password' ? 'text' : 'password';
+    $('#lg-eye').textContent = pw.type === 'password' ? '보기' : '숨기기';
+  };
+  const doLogin = async () => {
+    const msg = $('#lg-msg');
+    const email = $('#lg-email').value.trim();
+    const pw = $('#lg-pw').value;
+    if (!email || !pw) return (msg.textContent = '이메일과 비밀번호를 모두 넣어 주세요.');
+    $('#lg-btn').disabled = true;
+    msg.textContent = '';
     try {
-      await login($('#lg-email').value.trim(), $('#lg-pw').value);
+      await login(email, pw);
     } catch (e) {
-      alert('로그인 실패: 이메일과 비밀번호를 확인해 주세요.');
+      console.warn('로그인 실패', e);
+      const m = String(e?.message || e);
+      // 진짜 이유를 보여 줌 (예전엔 무엇이든 '비밀번호 확인'으로 나왔음)
+      msg.textContent = /Invalid login credentials/i.test(m) ? '이메일 또는 비밀번호가 맞지 않아요. 앞뒤 빈칸, 대문자를 확인해 주세요. (견적 앱과 같은 계정)'
+        : /rate|too many/i.test(m) ? '여러 번 틀려서 잠시 막혔어요. 몇 분 뒤에 다시 해 주세요.'
+        : /not confirmed/i.test(m) ? '이메일 인증이 안 된 계정이에요.'
+        : /fetch|network|Failed|NO_CLIENT|load/i.test(m) || !navigator.onLine ? '인터넷 연결이 불안정해요. 와이파이·데이터를 확인하고 다시 해 주세요.'
+        : `로그인하지 못했어요: ${m}`;
+    } finally {
+      $('#lg-btn').disabled = false;
     }
   };
+  $('#lg-btn').onclick = doLogin;
+  $('#lg-pw').addEventListener('keydown', (e) => e.key === 'Enter' && doLogin());
 }
 
 /* ================= ① 일정 ================= */
@@ -275,10 +299,11 @@ const TASK_WHO = ['LEE', 'BEE', '같이'];
 const tasksAll = () => store.state.tasks || [];
 // '내 것만': 내 이름이거나 '같이'·담당 미정인 것
 const mineOk = (x) => !ui.mine || !me() || !x.who || x.who === '같이' || x.who === me();
-const tasksOn = (d) => tasksAll().filter((x) => x.date === d && mineOk(x)).sort((a, b) => (a.done - b.done) || (a.time || '99').localeCompare(b.time || '99'));
+const taskTimeKey = (x) => (x.allDay ? '00' : x.time || '99'); // 종일은 맨 위
+const tasksOn = (d) => tasksAll().filter((x) => x.date === d && mineOk(x)).sort((a, b) => (a.done - b.done) || taskTimeKey(a).localeCompare(taskTimeKey(b)));
 
 function taskCard(x, showDate = false) {
-  const sub = [showDate && (x.date ? md(x.date) : ''), x.time && timeLabel(x.time), x.who].filter(Boolean).join(' · ');
+  const sub = [showDate && (x.date ? md(x.date) : ''), x.allDay ? '종일' : x.time && timeLabel(x.time), x.who].filter(Boolean).join(' · ');
   const job = x.jobId && store.state.jobs.find((j) => j.id === x.jobId);
   return `<div class="task ${x.done ? 'done' : ''} ${x.kind === '미팅' ? 'meet' : ''}" data-tk-row="${x.id}">
     <button class="tk-check" data-tk-done="${x.id}" aria-label="${x.done ? '안 끝남으로' : '끝남으로'}">${ic('check')}</button>
@@ -317,7 +342,8 @@ function taskSheet(x, { date, jobId, fromJob } = {}) {
     <div class="field"><span>종류</span>${chipRow('tkind', TASK_KINDS, t.kind)}</div>
     <label class="field"><span>제목</span><input id="tk-title" value="${esc(t.title)}" placeholder="예) 자재상 결제, 인테리어 업체 미팅" autocomplete="off" /></label>
     <div class="field"><span>날짜 · 시간 <span class="faint">(날짜를 비우면 '날짜 없는 할 일')</span></span>
-      <div class="grid2"><input type="date" id="tk-date" value="${esc(t.date)}" />${timeField(t.time)}</div></div>
+      <div class="grid2"><input type="date" id="tk-date" value="${esc(t.date)}" /><div id="tk-timebox" ${t.allDay ? 'hidden' : ''}>${timeField(t.time)}</div><div id="tk-allday-v" class="allday-v" ${t.allDay ? '' : 'hidden'}>종일</div></div>
+      <label class="check" style="margin-top:8px"><input type="checkbox" id="tk-allday" ${t.allDay ? 'checked' : ''} /> 종일 (시간 없이 하루 종일)</label></div>
     <div class="field"><span>누구 일</span>${chipRow('twho', TASK_WHO, t.who)}</div>
     <label class="field"><span>메모 · 미팅 기록</span><textarea id="tk-memo" rows="5" placeholder="나눈 이야기, 정한 것, 다음에 할 일 등">${esc(t.memo)}</textarea></label>
     ${fromJob ? '' : `<label class="field"><span>관련 현장 <span class="faint">(선택)</span></span><select id="tk-job"><option value="">없음</option>${recentJobs.map((j) => `<option value="${j.id}" ${j.id === t.jobId ? 'selected' : ''}>${esc(`${j.date ? md(j.date) : '미정'} ${custName(customerOf(j))}${j.work ? ' · ' + j.work : ''}`)}</option>`).join('')}</select></label>`}
@@ -327,19 +353,27 @@ function taskSheet(x, { date, jobId, fromJob } = {}) {
   bindChips(s, 'tkind');
   bindChips(s, 'twho', null, true);
   bindTimeField(s);
+  $('#tk-allday', s).onchange = (e) => {
+    $('#tk-timebox', s).hidden = e.target.checked;
+    $('#tk-allday-v', s).hidden = !e.target.checked;
+  };
   if (isNew && !fromJob) setTimeout(() => $('#tk-title', s)?.focus({ preventScroll: true }), 50);
   $('#tk-save', s).onclick = async () => {
     const title = $('#tk-title', s).value.trim();
     if (!title) return toast('제목을 적어 주세요');
     const done = $('#tk-done', s) ? $('#tk-done', s).checked : t.done;
+    const allDay = $('#tk-allday', s).checked;
     const next = {
-      ...t, title, kind: chipVal(s, 'tkind') || '할 일', date: $('#tk-date', s).value, time: $('#jf-time', s).value,
+      ...t, title, kind: chipVal(s, 'tkind') || '할 일', date: $('#tk-date', s).value, allDay, time: allDay ? '' : $('#jf-time', s).value,
       who: chipVal(s, 'twho') || '', memo: $('#tk-memo', s).value.trim(), done, doneAt: done ? t.doneAt || today() : '',
       jobId: fromJob ? '' : $('#tk-job', s)?.value || '',
     };
     if (fromJob) return finishJobToTask(fromJob, next);
+    $('#tk-save', s).disabled = true; // 두 번 눌림 방지
     await save('tasks', next);
     closeSheet();
+    // 저장하면 그 달 할 일·미팅 목록으로
+    tasksListSheet('all', (next.date || today()).slice(0, 7));
     toast('저장했어요');
   };
   $('#tk-del', s) && ($('#tk-del', s).onclick = async () => {

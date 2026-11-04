@@ -208,6 +208,11 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .card + .link-btn { margin: -4px 0 14px; }
 /* 할 일 · 미팅 */
 .tk-tools { display: flex; gap: 6px; }
+.allday-v { display: flex; align-items: center; padding: 0 14px; height: 48px; border-radius: 12px; background: var(--gray-soft); color: var(--ink-2); font-weight: 700; }
+.allday-v[hidden], #tk-timebox[hidden] { display: none; }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 72px !important; }
+.pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); height: 36px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 700; color: var(--ink-2); background: var(--gray-soft); }
 .alert.task-chip { background: var(--card); color: var(--blue); border: 1px solid var(--blue-soft); }
 .alert.task-chip svg.i { width: 15px; height: 15px; }
 .task { display: flex; align-items: flex-start; gap: 10px; background: var(--card); border: 1px solid var(--line-2); border-radius: 14px; padding: 12px; margin-bottom: 8px; }

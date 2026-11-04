@@ -185,7 +185,7 @@ async function initCloud() {
       store.user = null;
       if (channel) sb.removeChannel(channel);
       channel = null;
-      localStorage.removeItem(CACHE_KEY);
+      // 이 기기의 마지막 데이터는 지우지 않음 (서버에 문제가 생겼을 때 비상 백업이 됨)
       emit();
     }
   });
@@ -256,6 +256,13 @@ export async function initStore() {
   } else {
     await initCloud();
   }
+}
+
+// 서버에 닿지 못해도, 이 기기에 남아 있는 마지막 데이터(+아직 못 올린 변경)를 꺼냄 — 비상 백업용
+export function cachedBackup() {
+  const d = readJSON(CACHE_KEY, null);
+  if (!d) return null;
+  return { ...d, outbox: readJSON(OUTBOX_KEY, []) };
 }
 
 export async function login(email, password) {

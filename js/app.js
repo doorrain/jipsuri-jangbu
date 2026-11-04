@@ -1,4 +1,4 @@
-import { store, subscribe, initStore, login, logout, save, remove, saveSettings, restoreAll, newId } from './store.js';
+import { store, subscribe, initStore, login, logout, save, remove, saveSettings, restoreAll, newId, cachedBackup } from './store.js';
 import {
   esc, num, won, parseNum, moneyInput, today, addDays, ymd, toDate, md, fullDate, timeLabel, weekday,
   monthStart, monthEnd, addMonths, digits, fmtPhone, matches, download,
@@ -236,7 +236,14 @@ function renderLogin() {
       <div class="small" id="lg-msg" style="color:var(--red);min-height:18px;margin:-4px 0 10px"></div>
       <button class="btn block" id="lg-btn">로그인</button>
       <p class="hint">한 번 로그인하면 계속 유지됩니다.</p>
+      ${cachedBackup() ? '<button class="btn ghost block" id="lg-rescue" style="margin-top:18px">이 기기에 남은 데이터 내려받기 (비상 백업)</button>' : ''}
     </div>`;
+  $('#lg-rescue') && ($('#lg-rescue').onclick = () => {
+    const d = cachedBackup();
+    const blob = new Blob([JSON.stringify({ app: 'hyeonjang', at: new Date().toISOString(), rescue: true, ...d }, null, 1)], { type: 'application/json' });
+    download(blob, `현장장부_비상백업_${today()}_${navigator.userAgent.includes('Mobile') ? '휴대폰' : 'PC'}.json`);
+    toast(`고객 ${d.customers?.length || 0}명, 작업 ${d.jobs?.length || 0}건, 매입 ${d.purchases?.length || 0}건을 내려받았어요`);
+  });
   $('#lg-email').setAttribute('autocapitalize', 'off');
   $('#lg-eye').onclick = () => {
     const pw = $('#lg-pw');
@@ -259,7 +266,9 @@ function renderLogin() {
       msg.textContent = /Invalid login credentials/i.test(m) ? '이메일 또는 비밀번호가 맞지 않아요. 앞뒤 빈칸, 대문자를 확인해 주세요. (견적 앱과 같은 계정)'
         : /rate|too many/i.test(m) ? '여러 번 틀려서 잠시 막혔어요. 몇 분 뒤에 다시 해 주세요.'
         : /not confirmed/i.test(m) ? '이메일 인증이 안 된 계정이에요.'
-        : /fetch|network|Failed|NO_CLIENT|load/i.test(m) || !navigator.onLine ? '인터넷 연결이 불안정해요. 와이파이·데이터를 확인하고 다시 해 주세요.'
+        : !navigator.onLine ? '인터넷이 끊겨 있어요. 와이파이·데이터를 확인하고 다시 해 주세요.'
+        // 인터넷은 되는데 서버에 닿지 않음: Supabase 프로젝트가 일시정지됐을 때 이렇게 됨
+        : /fetch|network|Failed|NO_CLIENT|load/i.test(m) ? '저장 서버(Supabase)에 연결되지 않아요. 서버가 일시정지됐을 수 있어요. supabase.com에서 프로젝트 상태를 확인해 주세요.'
         : `로그인하지 못했어요: ${m}`;
     } finally {
       $('#lg-btn').disabled = false;

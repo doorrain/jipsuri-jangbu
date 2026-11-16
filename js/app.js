@@ -23,7 +23,7 @@ const ME_KEY = 'hyeonjang-me';
 const UI_KEY = 'hyeonjang-ui';
 
 const ui = Object.assign(
-  { sel: today(), cal: 'week', cq: '', csort: 'recent', lt: 'sales', lm: today(), lf: '전체', bf: '전체', rp: 'month', rfrom: monthStart(today()), rto: monthEnd(today()), stage: '전체' },
+  { sel: today(), cal: 'week', cq: '', csort: 'recent', lt: 'sales', lm: today(), lf: '전체', bf: '전체', rp: 'month', rfrom: monthStart(today()), rto: monthEnd(today()), stage: '전체', tkSel: today(), tkAll: false, tkKind: '전체' },
   (() => {
     try {
       const u = JSON.parse(localStorage.getItem(UI_KEY)) || {};
@@ -197,7 +197,7 @@ function route() {
 }
 function doRender() {
   const { r, arg } = route();
-  const tab = { schedule: 'schedule', job: 'schedule', customers: 'customers', customer: 'customers', ledger: 'ledger', report: 'report', settings: 'settings' }[r] || 'schedule';
+  const tab = { schedule: 'schedule', job: 'schedule', tasks: 'tasks', customers: 'customers', customer: 'customers', ledger: 'ledger', report: 'report', settings: 'settings' }[r] || 'schedule';
   $$('#tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   if (!store.ready) {
     view.innerHTML = '<div class="empty" style="padding-top:40vh">불러오는 중…</div>';
@@ -206,7 +206,7 @@ function doRender() {
   if (store.mode === 'cloud' && !store.user) return renderLogin();
   $('#tabbar').hidden = false;
   $('#fab').hidden = ['job', 'customer', 'settings'].includes(r);
-  const fn = { schedule: renderSchedule, job: () => renderJob(arg), customers: renderCustomers, customer: () => renderCustomer(arg), ledger: renderLedger, report: renderReport, settings: renderSettings }[r] || renderSchedule;
+  const fn = { schedule: renderSchedule, tasks: renderTasks, job: () => renderJob(arg), customers: renderCustomers, customer: () => renderCustomer(arg), ledger: renderLedger, report: renderReport, settings: renderSettings }[r] || renderSchedule;
   fn();
 }
 subscribe(() => {
@@ -381,9 +381,11 @@ function taskSheet(x, { date, jobId, fromJob } = {}) {
     $('#tk-save', s).disabled = true; // 두 번 눌림 방지
     await save('tasks', next);
     closeSheet();
-    // 저장하면 그 달 할 일·미팅 목록으로
-    tasksListSheet('all', (next.date || today()).slice(0, 7));
     toast('저장했어요');
+    if (route().r === 'job') return; // 현장 화면에서 추가했으면 그 화면에 그대로
+    // 저장하면 할 일 탭의 그 날짜 목록으로 (날짜가 없으면 이 달 전체 맨 아래 '날짜 없는 할 일')
+    Object.assign(ui, { tkSel: next.date || today(), tkAll: !next.date, tkKind: '전체' });
+    go('#tasks');
   };
   $('#tk-del', s) && ($('#tk-del', s).onclick = async () => {
     if (!confirm('이 할 일·미팅을 삭제할까요?')) return;
@@ -525,6 +527,89 @@ function tasksListSheet(mode = 'open', month = '') { // month: 'YYYY-MM' (일정
     draw();
   });
   draw();
+}
+
+/* ================= 할 일 · 미팅 탭 ================= */
+function renderTasks() {
+  const t = today();
+  const sel = ui.tkSel;
+  const mFrom = monthStart(sel), mTo = monthEnd(sel);
+  const sd = toDate(sel);
+  const isMeet = (x) => x.kind === '미팅';
+  const kindOk = (x) => ui.tkKind === '전체' || (ui.tkKind === '미팅' ? isMeet(x) : !isMeet(x)); // 기타는 할 일 쪽
+  const mine = tasksAll().filter(mineOk);
+  const scope = mine.filter((x) => (ui.tkAll ? inRange(x.date, mFrom, mTo) : x.date === sel));
+  const shown = scope.filter(kindOk);
+  // 날짜 없는 할 일은 등록한 달에 표시
+  const undated = ui.tkAll ? mine.filter((x) => !x.date && !x.done && kindOk(x) && inRange(x.createdAt ? ymd(new Date(x.createdAt)) : '', mFrom, mTo)) : [];
+  const dates = [...new Set(shown.map((x) => x.date))].sort();
+  const dayList = (ds) => shown.filter((x) => x.date === ds).sort((a, b) => (a.done - b.done) || taskTimeKey(a).localeCompare(taskTimeKey(b)));
+  // 달력 점: 할 일은 주황, 미팅은 파랑
+  const dayCell = (ds, extra = '') => {
+    const on = mine.filter((x) => x.date === ds && kindOk(x));
+    const m = on.filter(isMeet).length;
+    return `<button class="day ${ds === t ? 'today' : ''} ${!ui.tkAll && ds === sel ? 'sel' : ''} ${toDate(ds).getDay() === 0 ? 'sun' : ''} ${extra}" data-tkday="${ds}">
+      ${extra.includes('m') ? '' : `<span class="w">${weekday(ds)}</span>`}<span class="d">${toDate(ds).getDate()}</span>
+      <span class="dots">${'<i></i>'.repeat(Math.min(on.length - m, 2))}${'<i class="t"></i>'.repeat(Math.min(m, 2))}</span></button>`;
+  };
+  let cal;
+  if (ui.cal === 'week') {
+    const s = addDays(sel, -toDate(sel).getDay());
+    cal = `<div class="week">${Array.from({ length: 7 }, (_, i) => dayCell(addDays(s, i))).join('')}</div>`;
+  } else {
+    const start = addDays(mFrom, -toDate(mFrom).getDay());
+    const cells = [];
+    for (let i = 0; i < 42; i++) {
+      const ds = addDays(start, i);
+      if (i >= 35 && ds.slice(0, 7) !== mFrom.slice(0, 7)) break;
+      cells.push(dayCell(ds, `m ${ds.slice(0, 7) !== mFrom.slice(0, 7) ? 'out' : ''}`));
+    }
+    cal = `<div class="month">${['일', '월', '화', '수', '목', '금', '토'].map((w) => `<div class="wh">${w}</div>`).join('')}${cells.join('')}</div>`;
+  }
+  const nKind = (k) => scope.filter((x) => k === '전체' || (k === '미팅' ? isMeet(x) : !isMeet(x))).length;
+  const dayName = fullDate(sel).replace(/^\d+년 /, '');
+  const isToday = !ui.tkAll && sel === t;
+  view.innerHTML = `
+    <header class="hd">
+      <div class="grow"><p class="eyebrow">${syncBadge()}</p><h1>할 일 · 미팅</h1></div>
+      <button class="icon-btn" data-tk-all aria-label="검색">${ic('search')}</button>
+    </header>
+    <div class="seg" style="margin-bottom:10px">${['전체', '할 일', '미팅'].map((k) => `<button class="${ui.tkKind === k ? 'on' : ''}" data-tkkind="${k}">${k} ${nKind(k)}</button>`).join('')}</div>
+    <div class="chips">
+      <button class="chip sm ${isToday ? 'on' : ''}" data-tkq="today">오늘</button>
+      <button class="chip sm ${ui.tkAll ? 'on' : ''}" data-tkq="month">${sd.getMonth() + 1}월 전체</button>
+      ${me() ? `<button class="chip sm ${ui.mine ? 'on' : ''}" data-mine>${ui.mine ? '✓ ' : ''}내 것만</button>` : ''}
+    </div>
+    <div class="cal-head">
+      <button class="icon-btn" data-tkmove="-1">${ic('left')}</button>
+      <span class="m">${sd.getFullYear()}년 ${sd.getMonth() + 1}월</span>
+      <button class="icon-btn" data-tkmove="1">${ic('right')}</button>
+      <div class="seg"><button class="${ui.cal === 'week' ? 'on' : ''}" data-calmode="week">주</button><button class="${ui.cal === 'month' ? 'on' : ''}" data-calmode="month">월</button></div>
+    </div>
+    ${cal}
+    <div class="sec-title">${ui.tkAll ? `${sd.getMonth() + 1}월 전체` : isToday ? `오늘 · ${dayName}` : dayName}<span class="r">${shown.length ? shown.length + '건' : ''}</span></div>
+    ${ui.tkAll
+    ? dates.map((ds) => `<div class="tk-date">${esc(md(ds))}${ds === t ? ' · 오늘' : ''}</div>${dayList(ds).map((x) => taskCard(x)).join('')}`).join('')
+    : dayList(sel).map((x) => taskCard(x)).join('')}
+    ${shown.length ? '' : '<div class="empty">등록된 내용이 없습니다</div>'}
+    ${undated.length ? `<div class="sec-title">날짜 없는 할 일<span class="r">${undated.length}건</span></div>${undated.map((x) => taskCard(x)).join('')}` : ''}
+  `;
+  bindTasks(view);
+  $('[data-tk-all]').onclick = () => tasksListSheet();
+  $('[data-mine]') && ($('[data-mine]').onclick = () => { ui.mine = !ui.mine; saveUi(); render(); });
+  $$('[data-tkkind]').forEach((b) => (b.onclick = () => { ui.tkKind = b.dataset.tkkind; render(); }));
+  $$('[data-tkday]').forEach((b) => (b.onclick = () => { ui.tkSel = b.dataset.tkday; ui.tkAll = false; render(); }));
+  $$('[data-tkq]').forEach((b) => (b.onclick = () => {
+    if (b.dataset.tkq === 'today') Object.assign(ui, { tkSel: t, tkAll: false });
+    else ui.tkAll = true;
+    render();
+  }));
+  $$('[data-calmode]').forEach((b) => (b.onclick = () => { ui.cal = b.dataset.calmode; saveUi(); render(); }));
+  $$('[data-tkmove]').forEach((b) => (b.onclick = () => {
+    const k = Number(b.dataset.tkmove);
+    ui.tkSel = ui.cal === 'week' && !ui.tkAll ? addDays(sel, 7 * k) : addMonths(sel, k);
+    render();
+  }));
 }
 
 function renderSchedule() {
@@ -1906,11 +1991,14 @@ function renderReport() {
 }
 
 /* ================= 설정 ================= */
+const PHOTO_QUOTA_GB = 100;
 function renderSettings() {
   const set = store.state.settings;
   const used = usedBytes();
-  const quota = (set.photoQuotaMB || 1024) * 1024 * 1024;
+  // 유료(Pro) 서버 사진 저장공간 100GB (예전 서버에 저장된 photoQuotaMB 1GB 값은 쓰지 않음)
+  const quota = PHOTO_QUOTA_GB * 1024 ** 3;
   const pct = Math.min(100, (used / quota) * 100);
+  const usedLabel = used >= 1024 ** 3 ? `${(used / 1024 ** 3).toFixed(2)}GB` : `${(used / 1024 / 1024).toFixed(1)}MB`;
   const photoN = store.state.jobs.reduce((s, j) => s + (j.photos || []).length, 0);
   view.innerHTML = `
     <header class="hd sub"><button class="icon-btn" data-back>${ic('back')}</button><h1 class="grow">설정</h1></header>
@@ -1919,8 +2007,8 @@ function renderSettings() {
       ${chipRow('me', PAYERS, me())}</div>
     <div class="card"><h3>사진 저장공간 <span class="r">${photoN}장</span></h3>
       <div class="gauge ${pct > 80 ? 'warn' : ''}"><i style="width:${pct}%"></i></div>
-      <div class="row small"><span class="grow">${(used / 1024 / 1024).toFixed(1)}MB 사용 / ${set.photoQuotaMB || 1024}MB</span><b>${pct.toFixed(1)}%</b></div>
-      ${pct > 80 ? '<p class="small" style="color:var(--red)">공간이 거의 찼어요. 오래된 현장 사진을 내려받아 보관한 뒤 정리해 주세요.</p>' : '<p class="muted small">무료 저장공간(1GB)에는 사진 약 3,000장이 들어가요.</p>'}</div>
+      <div class="row small"><span class="grow">${usedLabel} 사용 / ${PHOTO_QUOTA_GB}GB</span><b>${pct < 0.1 && used ? '0.1% 미만' : pct.toFixed(1) + '%'}</b></div>
+      ${pct > 80 ? '<p class="small" style="color:var(--red)">공간이 거의 찼어요. 오래된 현장 사진을 내려받아 보관한 뒤 정리해 주세요.</p>' : `<p class="muted small">유료 서버 저장공간 ${PHOTO_QUOTA_GB}GB에는 사진(장당 약 300KB)이 약 30만 장 들어가요. 조색 앱 사진과 함께 쓰는 공간이에요.</p>`}</div>
     <div class="card"><h3>구매처</h3><textarea class="input" id="s-vendors" style="height:110px;padding:12px">${esc((set.vendors || []).join('\n'))}</textarea></div>
     <div class="card"><h3>입금 은행</h3><textarea class="input" id="s-banks" style="height:110px;padding:12px">${esc((set.banks || []).join('\n'))}</textarea></div>
     <button class="btn block" id="s-save" style="margin-bottom:12px">목록 저장</button>
@@ -1971,6 +2059,7 @@ $('#tabbar').addEventListener('click', (e) => {
 $('#fab').onclick = () => {
   const { r } = route();
   if (r === 'ledger' && ui.lt === 'buys') return purchaseSheet();
+  if (r === 'tasks') return taskSheet(null, { date: ui.tkAll ? today() : ui.tkSel });
   openSheet(`${sheetHead('무엇을 기록할까요?')}
     <div class="list">
       <button class="li" data-q="job"><div class="avatar" style="background:var(--accent-soft);color:var(--accent)">${ic('cal')}</div><div class="grow"><div class="t1">새 일정 · 문의</div><div class="t2">고객, 날짜, 유입경로만 넣으면 끝</div></div></button>

@@ -25,5 +25,5 @@ export const DEFAULT_SETTINGS = {
   vendors: ['쿠팡', '네이버', 'G마켓', '다이소', '에이스하드웨어', '철물점'],
   banks: ['카카오뱅크', '토스뱅크', '국민', '신한', '우리', '하나', '농협', '기업', '네이버페이'],
   workers: [], // { name, phone, type }
-  photoQuotaMB: 1024,
+  photoQuotaMB: 102400, // 유료(Pro) 100GB — 화면은 app.js의 PHOTO_QUOTA_GB 기준
 };

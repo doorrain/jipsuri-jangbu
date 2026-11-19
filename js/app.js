@@ -1101,7 +1101,7 @@ function openJobForm({ job, customerId, prefill, afterSave, asOf } = {}) {
         return;
       }
       try {
-        const added = await uploadPhotos(j.id, pending, '문의', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
+        const added = await uploadPhotos(j.id, pending, '', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
         const fresh = store.state.jobs.find((x) => x.id === j.id) || j;
         await save('jobs', { ...fresh, photos: [...(fresh.photos || []), ...added] });
         toast(`일정 등록 · 사진 ${added.length}장을 올렸어요`);
@@ -1135,7 +1135,7 @@ function renderJob(id) {
   const asCandidates = isAS(j) ? [] : customerJobs(j.customerId)
     .filter((x) => x.id !== j.id && !isAS(x) && x.status !== '취소' && (!j.date || !x.date || x.date <= j.date));
   const linkedTasks = tasksAll().filter((x) => x.jobId === j.id).sort((a, b) => (a.done - b.done) || (b.date || '').localeCompare(a.date || ''));
-  const photos = (j.photos || []).filter((p) => ui.stage === '전체' || p.stage === ui.stage);
+  const photos = j.photos || []; // 구분 없이 올린 순서대로
   const ti = j.taxInvoice || {};
   const rv = j.review || {};
   const addrQ = encodeURIComponent(j.address || '');
@@ -1208,8 +1208,7 @@ function renderJob(id) {
 
     <div class="card">
       <h3>${ic('camera')} 현장 사진 <span class="r">${(j.photos || []).length}장</span></h3>
-      ${(j.photos || []).length ? `<div class="chips scroll" style="margin-bottom:10px">${['전체', ...PHOTO_STAGES].map((s) => `<button class="chip sm ${ui.stage === s ? 'on' : ''}" data-stage="${s}">${s}${s !== '전체' ? ` ${(j.photos || []).filter((p) => p.stage === s).length || ''}` : ''}</button>`).join('')}</div>` : ''}
-      <div class="photos">${photos.map((p) => `<button data-photo="${p.id}"><img data-src="${esc(p.thumb)}" alt="" loading="lazy" /><span class="st">${esc(p.stage)}</span></button>`).join('')}</div>
+      <div class="photos">${photos.map((p) => `<button data-photo="${p.id}"><img data-src="${esc(p.thumb)}" alt="" loading="lazy" /></button>`).join('')}</div>
       <div class="btns" style="margin-top:10px"><button class="add-line" id="j-addphoto" style="margin:0">${ic('plus')} 사진 추가</button>${(j.photos || []).length ? `<button class="add-line" id="j-zip" style="margin:0">${ic('down')} 전체 내려받기</button>` : ''}</div>
       <input type="file" id="j-file" accept="image/*" multiple hidden />
     </div>
@@ -1278,7 +1277,6 @@ function renderJob(id) {
   $('#ti-date') && ($('#ti-date').onchange = (e) => save('jobs', { ...j, taxInvoice: { ...ti, date: e.target.value } }));
   $('#j-addbuy').onclick = () => purchaseSheet(null, j.id);
   $$('[data-buy]').forEach((b) => (b.onclick = () => purchaseSheet(store.state.purchases.find((p) => p.id === b.dataset.buy))));
-  $$('[data-stage]').forEach((b) => (b.onclick = () => { ui.stage = b.dataset.stage; render(); }));
   $$('[data-photo]').forEach((b) => (b.onclick = () => openViewer(j, b.dataset.photo)));
   $('#j-addphoto').onclick = () => photoAddSheet(j);
   $('#j-zip') && ($('#j-zip').onclick = () => zipSheet([j], `${custName(c)}_${j.date || '날짜미정'}`));
@@ -1875,7 +1873,7 @@ function reportSheet(j0, repId, type) {
     e.target.value = '';
     if (!files.length) return;
     try {
-      const added = await uploadPhotos(j.id, files, isFinal ? '작업 후' : '작업 중', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
+      const added = await uploadPhotos(j.id, files, '', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
       const f = freshJob(j);
       await save('jobs', { ...f, photos: [...(f.photos || []), ...added] });
       const room = REPORT_MAX - picked.length;
@@ -1947,37 +1945,30 @@ function photoOrderSheet(files) {
   });
 }
 
+// 현장 사진: 구분(문의·작업 전…) 없이 바로 사진 선택 창을 열고, 올린 순서대로 붙임
 function photoAddSheet(j) {
   if (store.mode === 'cloud' && !navigator.onLine) return toast('사진은 인터넷이 연결됐을 때 올릴 수 있어요');
-  const s = openSheet(`
-    ${sheetHead('사진 추가')}
-    <p class="muted small" style="margin-top:-6px">어떤 사진인지 고르면 사진 선택 창이 열려요. 여러 장 한 번에 고를 수 있어요.</p>
-    <div class="grid2">${['문의', '작업 전', '후기', '작업 중', '기타', '작업 후'].map((st) => `<button class="btn ghost" data-st="${st}" style="height:64px">${st}</button>`).join('')}</div>
-    <p class="muted small">사진은 자동으로 줄여서(장당 약 300KB) 저장돼요. 원본은 휴대폰 갤러리에 그대로 있어요.</p>`);
-  $$('[data-st]', s).forEach((b) => (b.onclick = () => {
-    const input = $('#j-file');
-    input.value = '';
-    input.onchange = async () => {
-      const picked = [...input.files];
-      closeSheet();
-      if (!picked.length) return;
-      const files = picked.length > 1 ? await photoOrderSheet(picked) : picked;
-      try {
-        const added = await uploadPhotos(j.id, files, b.dataset.st, (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
-        const fresh = store.state.jobs.find((x) => x.id === j.id) || j;
-        await save('jobs', { ...fresh, photos: [...(fresh.photos || []), ...added] });
-        toast(`사진 ${added.length}장을 올렸어요`);
-      } catch (e) {
-        console.error(e);
-        alert('사진을 올리지 못했습니다. 인터넷 연결을 확인해 주세요.\n' + (e.message || ''));
-      }
-    };
-    input.click();
-  }));
+  const input = $('#j-file');
+  input.value = '';
+  input.onchange = async () => {
+    const picked = [...input.files];
+    if (!picked.length) return;
+    const files = picked.length > 1 ? await photoOrderSheet(picked) : picked;
+    try {
+      const added = await uploadPhotos(j.id, files, '', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
+      const fresh = store.state.jobs.find((x) => x.id === j.id) || j;
+      await save('jobs', { ...fresh, photos: [...(fresh.photos || []), ...added] });
+      toast(`사진 ${added.length}장을 올렸어요`);
+    } catch (e) {
+      console.error(e);
+      alert('사진을 올리지 못했습니다. 인터넷 연결을 확인해 주세요.\n' + (e.message || ''));
+    }
+  };
+  input.click();
 }
 
 function openViewer(j, pid) {
-  const list = (j.photos || []).filter((p) => ui.stage === '전체' || p.stage === ui.stage);
+  const list = j.photos || [];
   let i = Math.max(0, list.findIndex((p) => p.id === pid));
   const root = document.createElement('div');
   root.className = 'viewer';
@@ -1986,7 +1977,7 @@ function openViewer(j, pid) {
   const draw = async () => {
     const p = list[i];
     root.innerHTML = `
-      <div class="vt"><button class="icon-btn" data-x>${ic('x')}</button><div class="grow">${esc(p.stage)} · ${i + 1} / ${list.length}</div>
+      <div class="vt"><button class="icon-btn" data-x>${ic('x')}</button><div class="grow">${i + 1} / ${list.length}</div>
         <button class="icon-btn" data-prev ${i ? '' : 'disabled'}>${ic('left')}</button><button class="icon-btn" data-next ${i < list.length - 1 ? '' : 'disabled'}>${ic('right')}</button></div>
       <div class="vi"><img alt="" /></div>
       <div class="vb"><button class="btn" data-dl>${ic('down')} 내려받기</button><button class="btn" data-del>${ic('trash')} 삭제</button></div>`;
@@ -1994,7 +1985,7 @@ function openViewer(j, pid) {
     $('[data-prev]', root).onclick = () => { if (i) { i--; draw(); } };
     $('[data-next]', root).onclick = () => { if (i < list.length - 1) { i++; draw(); } };
     $('[data-dl]', root).onclick = async () => {
-      try { await downloadOne(p, `${custName(customerOf(j))}_${j.date || ''}_${p.stage}_${i + 1}.jpg`.replace(/[\\/:*?"<>|]/g, '_')); } catch (e) { alert('내려받지 못했습니다'); }
+      try { await downloadOne(p, `${custName(customerOf(j))}_${j.date || ''}_${i + 1}.jpg`.replace(/[\\/:*?"<>|]/g, '_')); } catch (e) { alert('내려받지 못했습니다'); }
     };
     $('[data-del]', root).onclick = async () => {
       if (!confirm('이 사진을 지울까요?')) return;

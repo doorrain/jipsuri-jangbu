@@ -180,7 +180,7 @@ export async function downloadOne(photo, name) {
   download(b, name || `${photo.id}.jpg`);
 }
 
-// mode: 'customer' (고객 > 현장 > 단계) / 'site' (현장(고객) > 단계)
+// mode: 'customer' (고객 > 현장) / 'site' (현장(고객)) — 사진 구분 없이 올린 순서대로 01, 02…
 export async function downloadZip(jobs, mode, zipName, onProgress) {
   const list = jobs.flatMap((j) => (j.photos || []).map((p) => ({ j, p })));
   if (!list.length) throw new Error('내려받을 사진이 없습니다');
@@ -192,7 +192,7 @@ export async function downloadZip(jobs, mode, zipName, onProgress) {
     onProgress && onProgress(++i, list.length);
     const cust = safe(custName(customerOf(j)));
     const dir = mode === 'customer' ? `${cust}/${siteName(j)}` : `${siteName(j)} (${cust})`;
-    const folder = `${dir}/${safe(p.stage || '기타')}`;
+    const folder = dir;
     counters[folder] = (counters[folder] || 0) + 1;
     zip.file(`${folder}/${String(counters[folder]).padStart(2, '0')}.jpg`, await getBlob(p.path));
   }

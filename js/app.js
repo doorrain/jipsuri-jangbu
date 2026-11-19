@@ -1754,25 +1754,21 @@ function fileReadySheet(blob, filename, type) {
 }
 
 /* ---------- 작업 보고서 ---------- */
-// 사진 고르기: 누른 순서대로 번호(최대 max장)
-function photoPicker(root, name, photos, selected, max = 4) {
-  let order = selected.filter((id) => photos.some((p) => p.id === id));
-  const box = $(`[data-pick="${name}"]`, root);
-  const draw = () => {
-    box.innerHTML = photos.length
-      ? `<div class="photos ph-order">${photos.map((p) => { const n = order.indexOf(p.id); return `<button type="button" data-pid="${p.id}" class="${n >= 0 ? 'on' : ''}"><img data-src="${esc(p.thumb)}" alt="" /><span class="st">${esc(p.stage)}</span><span class="no" ${n < 0 ? 'hidden' : ''}>${n + 1}</span></button>`; }).join('')}</div>`
-      : '<div class="faint small">이 작업에 올린 사진이 없어요. 아래에서 새로 올릴 수 있어요.</div>';
-    hydrateImgs(box);
-    $$('[data-pid]', box).forEach((b) => (b.onclick = () => {
-      const id = b.dataset.pid;
-      if (order.includes(id)) order = order.filter((x) => x !== id);
-      else if (order.length >= max) return toast(`사진은 ${max}장까지 넣을 수 있어요 (한 장에 맞추려고)`);
-      else order = [...order, id];
-      draw();
-    }));
-  };
-  draw();
-  return { get: () => order, setPhotos: (ps) => { photos = ps; draw(); } };
+// 보고서 사진: 한 칸에 모아 보고서 아래쪽에 넣음 (A4 1장에 맞추려고 최대 6장)
+const REPORT_MAX = 6;
+// 예전 보고서(현장 확인 사진 / 작업 사진 따로)도 한 줄로 합쳐 읽음
+const reportPhotoIds = (r) => [...new Set([...(r.photos || []), ...(r.checkPhotos || []), ...(r.donePhotos || [])])];
+
+// 남은 작업: 이 작업에 연결된 이후 일정 (안 끝난 작업일 · 할 일·미팅 · A/S 방문)
+function upcomingWork(j, from = today()) {
+  const all = workDays(j);
+  const lines = [];
+  all.forEach((d, i) => { if (!d.done && d.date > from) lines.push({ date: d.date, t: `${md(d.date)} ${i + 1}일차${d.note ? ': ' + d.note : ''}` }); });
+  tasksAll().filter((x) => x.jobId === j.id && !x.done && (!x.date || x.date >= from))
+    .forEach((x) => lines.push({ date: x.date || '9999', t: `${x.date ? md(x.date) : '날짜 미정'} ${x.title}` }));
+  asJobsOf(j.id).filter((x) => x.status !== '취소' && !['작업완료', '정산완료'].includes(x.status))
+    .forEach((x) => lines.push({ date: x.date || '9999', t: `${x.date ? md(x.date) : '날짜 미정'} A/S: ${(x.work || '').replace(/^A\/S:\s*/, '') || '재방문'}` }));
+  return lines.sort((a, b) => a.date.localeCompare(b.date)).map((x) => '· ' + x.t).join('\n');
 }
 
 function reportDefaults(j, type) {
@@ -1785,11 +1781,11 @@ function reportDefaults(j, type) {
     return {
       dateLabel: first && lastD && first !== lastD ? `${md(first)} ~ ${md(lastD)}${ds.length > 1 ? ` (${ds.length}일)` : ''}` : md(first || today()),
       request: reps[0]?.request || j.work || '',
-      check: uniq(reps.map((r) => r.check)).join('\n'),
-      // 날짜별 작업 내용을 이어 붙여 요약 (고쳐서 쓸 수 있음)
-      done: reps.map((r) => r.done && `· ${r.dateLabel || md(r.writtenOn)}: ${r.done}`).filter(Boolean).join('\n'),
-      checkPhotos: uniq(reps.flatMap((r) => r.checkPhotos || [])).slice(0, 4),
-      donePhotos: uniq(reps.slice().reverse().flatMap((r) => r.donePhotos || [])).slice(0, 4),
+      check: '',
+      // 날짜별 작업 내용을 이어 붙여 요약 (고쳐서 쓸 수 있음). 예전 보고서의 '현장 확인'도 함께
+      done: reps.map((r) => { const t = [r.check, r.done].filter(Boolean).join(' → '); return t && `· ${r.dateLabel || md(r.writtenOn)}: ${t}`; }).filter(Boolean).join('\n'),
+      // 처음 보고서 사진 2장 + 마지막 쪽 보고서 사진들 (최대 6장)
+      photos: uniq([...reportPhotoIds(reps[0] || {}).slice(0, 2), ...reps.slice().reverse().flatMap(reportPhotoIds)]).slice(0, REPORT_MAX),
     };
   }
   const prev = reps[reps.length - 1];
@@ -1797,8 +1793,8 @@ function reportDefaults(j, type) {
   return {
     dateLabel: dayToday ? `${md(today())} (${all.indexOf(dayToday) + 1}/${all.length}일차)` : md(today()),
     request: prev?.request || j.work || '',
-    // 지난 보고서의 '남은 작업'이 이번 '작업 내용'의 시작점
-    check: '', done: dayToday?.note || prev?.remain || '', remain: '', checkPhotos: [], donePhotos: [],
+    // 작업 내용은 오늘 작업일에 적어 둔 할 일로 시작, 남은 작업은 이후 일정을 자동으로
+    check: '', done: dayToday?.note || '', remain: upcomingWork(j), photos: [],
   };
 }
 
@@ -1808,28 +1804,62 @@ function reportSheet(j0, repId, type) {
   type = cur?.type || type;
   const seq = cur?.seq || (j.reports || []).filter((r) => r.type !== '최종').length + 1;
   const r = cur ? { ...cur } : { id: newId('rp'), type, seq: type === '최종' ? 0 : seq, writtenOn: today(), ...reportDefaults(j, type) };
-  const photos = j.photos || [];
   const isFinal = type === '최종';
+  let picked = reportPhotoIds(r).filter((id) => (j.photos || []).some((p) => p.id === id)).slice(0, REPORT_MAX);
   const s = openSheet(`
     ${sheetHead(isFinal ? '최종 보고서' : `작업 보고서 · ${seq}차`)}
-    <p class="muted small" style="margin-top:-6px">${isFinal ? '지금까지 쓴 보고서를 모아 요약했어요. 고쳐서 쓰면 돼요.' : '현장 주소·작업 날짜는 자동으로 들어가요. 고객 전화번호는 넣지 않아요.'}</p>
-    <div class="kv"><span class="muted">현장 주소</span><span class="v">${esc(j.address || '없음')}</span></div>
+    <p class="muted small" style="margin-top:-6px">${isFinal ? '지금까지 쓴 보고서를 모아 요약했어요. 고쳐서 쓰면 돼요.' : '현장명·작업 날짜는 자동으로 들어가요. 고객 전화번호는 넣지 않아요.'}</p>
+    <div class="kv"><span class="muted">현장명</span><span class="v">${esc(custName(customerOf(j)))}</span></div>
     <label class="field" style="margin-top:8px"><span>작업 날짜</span><input id="rp-date" value="${esc(r.dateLabel)}" /></label>
     <label class="field"><span>1. 작업 요청 <span class="faint">고객이 요청한 내용</span></span><textarea id="rp-req" rows="3">${esc(r.request)}</textarea></label>
-    <label class="field"><span>2. 현장 확인 <span class="faint">문제가 된 부분</span></span><textarea id="rp-chk" rows="3" placeholder="예) 욕실 벽 타일 들뜸, 줄눈 사이 누수 흔적">${esc(r.check)}</textarea></label>
-    <div class="field"><span>현장 확인 사진 <span class="faint">누른 순서대로 · 최대 4장</span></span><div data-pick="chk"></div></div>
-    <label class="field"><span>3. ${isFinal ? '작업 경과 및 완료' : '작업 내용'} <span class="faint">어디를 어떻게 고쳤는지</span></span><textarea id="rp-done" rows="${isFinal ? 6 : 3}" placeholder="예) 들뜬 타일 철거 후 방수, 새 타일 시공">${esc(r.done)}</textarea></label>
-    <div class="field"><span>작업 사진 <span class="faint">누른 순서대로 · 최대 4장</span></span><div data-pick="done"></div></div>
-    ${isFinal ? '' : `<label class="field"><span>4. 남은 작업 <span class="faint">앞으로 할 일·예정일</span></span><textarea id="rp-remain" rows="3" placeholder="예) 11/21 줄눈 마감, 실리콘 시공 후 청소">${esc(r.remain || '')}</textarea></label>`}
-    <button type="button" class="add-line" id="rp-up" style="margin-top:0">${ic('camera')} 사진 새로 올리기</button>
+    <label class="field"><span>2. ${isFinal ? '작업 경과 및 완료' : '작업 내용'} <span class="faint">확인한 문제와 어디를 어떻게 고쳤는지</span></span><textarea id="rp-done" rows="${isFinal ? 6 : 4}" placeholder="예) 욕실 벽 타일 들뜸 확인 → 들뜬 타일 철거 후 방수, 새 타일 시공">${esc(r.done)}</textarea></label>
+    ${isFinal ? '' : `<div class="field"><span>3. 남은 작업 <span class="faint">이 작업에 잡힌 이후 일정</span></span><textarea id="rp-remain" rows="3" placeholder="이후 작업일·할 일·A/S가 있으면 자동으로 들어가요">${esc(r.remain || '')}</textarea>
+      <button type="button" class="btn sm ghost" id="rp-next" style="margin-top:6px">${ic('cal')} 이후 일정 다시 불러오기</button></div>`}
+    <div class="field"><span>보고서 사진 <span class="faint" id="rp-n"></span></span>
+      <div id="rp-photos"></div>
+      <div class="btns" style="margin-top:8px"><button type="button" class="add-line" id="rp-up" style="margin:0">${ic('camera')} 사진 올리기</button><button type="button" class="add-line" id="rp-pickbtn" style="margin:0">올린 현장 사진에서 고르기</button></div>
+      <div id="rp-pick" hidden style="margin-top:10px"></div>
+    </div>
     <input type="file" id="rp-file" accept="image/*" multiple hidden />
     <div class="foot btns">${cur ? '<button class="btn danger" id="rp-del" style="flex:0 0 80px">삭제</button>' : ''}<button class="btn line" id="rp-save">저장</button><button class="btn accent" id="rp-pdf">PDF 보내기</button></div>
   `, null, cur ? `rep-${cur.id}` : `rep-new-${j.id}-${type}`);
-  const pk = { chk: photoPicker(s, 'chk', photos, r.checkPhotos || []), done: photoPicker(s, 'done', photos, r.donePhotos || []) };
+  // 보고서에 들어갈 사진 (누르면 빠짐) + 고르기 칸 (현장 사진 전체에서 누르면 들어가고, 다시 누르면 빠짐)
+  const thumb = (p, n) => `<button type="button" data-rpid="${p.id}" class="${n >= 0 ? 'on' : ''}"><img data-src="${esc(p.thumb)}" alt="" /><span class="no" ${n < 0 ? 'hidden' : ''}>${n + 1}</span></button>`;
+  const drawPhotos = () => {
+    const all = freshJob(j).photos || [];
+    const byId = (id) => all.find((p) => p.id === id);
+    picked = picked.filter(byId);
+    $('#rp-n', s).textContent = `${picked.length}/${REPORT_MAX}장 · 누르면 빠져요`;
+    $('#rp-photos', s).innerHTML = picked.length
+      ? `<div class="photos ph-order">${picked.map((id, i) => thumb(byId(id), i)).join('')}</div>`
+      : '<div class="faint small">사진을 올리면 바로 보고서 아래쪽에 들어가요</div>';
+    const pick = $('#rp-pick', s);
+    if (!pick.hidden) pick.innerHTML = all.length ? `<div class="photos ph-order">${all.map((p) => thumb(p, picked.indexOf(p.id))).join('')}</div>` : '<div class="faint small">올린 현장 사진이 없어요</div>';
+    hydrateImgs(s);
+    $$('[data-rpid]', s).forEach((b) => (b.onclick = () => {
+      const id = b.dataset.rpid;
+      if (picked.includes(id)) picked = picked.filter((x) => x !== id);
+      else if (picked.length >= REPORT_MAX) return toast(`사진은 ${REPORT_MAX}장까지 넣을 수 있어요 (한 장에 맞추려고)`);
+      else picked = [...picked, id];
+      drawPhotos();
+    }));
+  };
+  $('#rp-pickbtn', s).onclick = () => {
+    const pick = $('#rp-pick', s);
+    pick.hidden = !pick.hidden;
+    $('#rp-pickbtn', s).textContent = pick.hidden ? '올린 현장 사진에서 고르기' : '고르기 닫기';
+    drawPhotos();
+  };
+  drawPhotos();
+  $('#rp-next', s) && ($('#rp-next', s).onclick = () => {
+    const t = upcomingWork(freshJob(j), r.writtenOn);
+    if (!t) return toast('이 작업에 잡힌 이후 일정이 없어요');
+    $('#rp-remain', s).value = t;
+  });
   const collect = () => ({
-    ...r, dateLabel: $('#rp-date', s).value.trim(), request: $('#rp-req', s).value.trim(), check: $('#rp-chk', s).value.trim(),
+    ...r, dateLabel: $('#rp-date', s).value.trim(), request: $('#rp-req', s).value.trim(), check: '',
     done: $('#rp-done', s).value.trim(), remain: $('#rp-remain', s)?.value.trim() || '',
-    checkPhotos: pk.chk.get(), donePhotos: pk.done.get(), at: r.at || new Date().toISOString(),
+    photos: picked, checkPhotos: [], donePhotos: [], at: r.at || new Date().toISOString(),
   });
   const persist = async () => {
     const nr = collect();
@@ -1838,20 +1868,20 @@ function reportSheet(j0, repId, type) {
     await save('jobs', { ...f, reports: reps });
     return nr;
   };
-  // 보고서에서 바로 사진 올리기 → 이 작업 사진에도 추가
+  // 보고서에서 바로 사진 올리기 → 보고서에 바로 들어가고, 이 작업 사진에도 추가
   $('#rp-up', s).onclick = () => $('#rp-file', s).click();
   $('#rp-file', s).onchange = async (e) => {
-    const picked = [...e.target.files];
+    const files = [...e.target.files];
     e.target.value = '';
-    if (!picked.length) return;
+    if (!files.length) return;
     try {
-      const added = await uploadPhotos(j.id, picked, isFinal ? '작업 후' : '작업 중', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
+      const added = await uploadPhotos(j.id, files, isFinal ? '작업 후' : '작업 중', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
       const f = freshJob(j);
       await save('jobs', { ...f, photos: [...(f.photos || []), ...added] });
-      const ps = freshJob(j).photos;
-      pk.chk.setPhotos(ps);
-      pk.done.setPhotos(ps);
-      toast(`사진 ${added.length}장을 올렸어요. 보고서에 넣을 사진을 눌러 주세요`);
+      const room = REPORT_MAX - picked.length;
+      picked = [...picked, ...added.slice(0, Math.max(room, 0)).map((p) => p.id)];
+      drawPhotos();
+      toast(added.length > room ? `사진 ${added.length}장을 올렸어요. 보고서에는 ${REPORT_MAX}장까지만 들어가요` : `사진 ${added.length}장을 보고서에 넣었어요`);
     } catch (err) {
       console.error(err);
       alert('사진을 올리지 못했어요.\n' + (err.message || ''));
@@ -1866,7 +1896,7 @@ function reportSheet(j0, repId, type) {
       const nr = await persist();
       const f = freshJob(j);
       const byId = (ids) => ids.map((id) => (f.photos || []).find((p) => p.id === id)).filter(Boolean);
-      const { blob, filename } = await makeReportPdf({ ...nr, address: f.address, title: f.work, checkPhotos: byId(nr.checkPhotos), donePhotos: byId(nr.donePhotos) }, new URL('icons/logo.png', location.href).href);
+      const { blob, filename } = await makeReportPdf({ ...nr, site: custName(customerOf(f)), photos: byId(nr.photos) }, new URL('icons/logo.png', location.href).href);
       closeSheet();
       fileReadySheet(blob, filename, 'application/pdf');
     } catch (err) {

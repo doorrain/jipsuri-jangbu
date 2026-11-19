@@ -122,6 +122,50 @@ export async function getBlob(path) {
   return idbDo('readonly', (s) => s.get(path));
 }
 
+/* ---------- 견적서 파일 (PDF·사진) ----------
+   사진 보관함은 사진만 받으므로 'site-files' 보관함에 따로 둡니다(서버_견적서첨부.sql). */
+export const FILE_BUCKET = 'site-files';
+const FILE_MAX = 20 * 1024 * 1024;
+const fkey = (p) => 'f:' + p; // 이 기기 모드에서 사진과 섞이지 않게
+
+export async function uploadDoc(jobId, file, name) {
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  if (!isPdf && !/^image\//.test(file.type)) throw new Error('PDF나 사진만 올릴 수 있어요');
+  // 사진·캡처는 글자가 읽히게 크게(긴 변 2000px) 줄이고, PDF는 그대로
+  const body = isPdf ? file : (await resize(file, 2000, 0.88)).blob;
+  if (body.size > FILE_MAX) throw new Error('20MB보다 큰 파일은 올릴 수 없어요');
+  const id = newId('qf');
+  const type = isPdf ? 'application/pdf' : 'image/jpeg';
+  const path = `${jobId}/${id}.${isPdf ? 'pdf' : 'jpg'}`;
+  if (store.mode === 'cloud') {
+    const { error } = await supabase().storage.from(FILE_BUCKET).upload(path, body, { contentType: type, upsert: true });
+    if (error) throw error;
+  } else {
+    await idbDo('readwrite', (s) => s.put(body, fkey(path)));
+  }
+  return { id, path, type, size: body.size, name: name || file.name || (isPdf ? '견적서.pdf' : '견적서 사진.jpg'), at: new Date().toISOString() };
+}
+
+export async function docBlob(path) {
+  if (store.mode === 'cloud') {
+    const { data, error } = await supabase().storage.from(FILE_BUCKET).download(path);
+    if (error) throw error;
+    return data;
+  }
+  return idbDo('readonly', (s) => s.get(fkey(path)));
+}
+
+export async function deleteDocs(list) {
+  const paths = list.map((f) => f.path);
+  if (!paths.length) return;
+  if (store.mode === 'cloud') {
+    const { error } = await supabase().storage.from(FILE_BUCKET).remove(paths);
+    if (error) throw error;
+  } else {
+    await idbDo('readwrite', (s) => paths.forEach((p) => s.delete(fkey(p))));
+  }
+}
+
 /* ---------- 용량 ---------- */
 export function usedBytes() {
   return store.state.jobs.reduce((s, j) => s + (j.photos || []).reduce((a, p) => a + (p.size || 0), 0), 0);

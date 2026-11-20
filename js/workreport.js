@@ -1,7 +1,8 @@
 // 작업 보고서 PDF (A4): 집주인·관리인에게 보내는 작업 요청 / 작업 내용 / 남은 작업 / 현장 사진 보고.
 // 견적 앱처럼 A4 크기 HTML을 그린 뒤 이미지로 찍어 PDF에 붙입니다(한글 글꼴 문제 없음).
 // 고객 전화번호는 넣지 않고, 현장명(고객으로 등록한 이름 그대로)·작업 날짜만 넣습니다.
-// 사진은 원본 비율 그대로 2장씩(최대 6장) 넣고, 첫 장에 다 안 들어가면 다음 장으로 이어 붙입니다.
+// 사진은 장수 제한 없이 원본 비율 그대로 2장씩 넣고, A4 한 장에 최대 6장(3줄)을 기준으로
+// 자리가 모자라거나 6장이 차면 다음 장으로 이어 붙입니다.
 import { getBlob } from './photos.js';
 import { esc, loadScript, md } from './util.js';
 
@@ -13,7 +14,8 @@ export const COMPANY = { name: '하이집수리', person: '담당자', phone: '0
 const W = 794, H = 1123, PAD = 44; // A4 @96dpi
 const GAP = 10;
 const COL_W = (W - PAD * 2 - GAP) / 2; // 사진 한 칸 너비
-const MAX_PH = 420; // 세로 사진이 너무 길어지지 않게 (비율은 그대로, 크기만 줄임)
+const MAX_PH = 270; // 세로 사진도 한 장에 3줄(6장)이 들어가게 (비율은 그대로, 크기만 줄임)
+const PER_PAGE = 6;
 
 const CSS = `
 .wr{width:${W}px;height:${H}px;padding:${PAD}px;box-sizing:border-box;background:#fff;color:#1c2430;font-family:'Noto Sans KR',sans-serif;
@@ -70,7 +72,7 @@ export async function makeReportPdf(r, logoUrl) {
     l.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap';
     document.head.append(l);
   }
-  const pics = await loadPhotos((r.photos || []).slice(0, 6));
+  const pics = await loadPhotos(r.photos || []);
   const isFinal = r.type === '최종';
   const title = isFinal ? '최종 작업 보고서' : '작업 보고서';
   const done = [r.check, r.done].filter(Boolean).join('\n'); // 예전 보고서의 '현장 확인'은 작업 내용 앞에
@@ -105,20 +107,24 @@ export async function makeReportPdf(r, logoUrl) {
     await Promise.all(['400', '700', '800', '900'].map((w) => document.fonts.load(`${w} 14px "Noto Sans KR"`, stage.textContent).catch(() => {})));
     await document.fonts.ready;
 
-    // 사진 2장씩 한 줄. 줄이 들어갈 자리가 없으면 다음 장에 이어서 (제목 칸은 첫 줄과 같이 움직임)
+    // 사진 2장씩 한 줄. 자리가 없거나 그 장에 사진이 6장 찼으면 다음 장에 이어서 (제목 칸은 첫 줄과 같이 움직임)
+    const onPage = new Map(); // 장마다 들어간 사진 수
     for (let i = 0; i < pics.length; i += 2) {
+      const n = Math.min(2, pics.length - i);
       const row = `<div class="row">${pics.slice(i, i + 2).map((p) => `<div class="cell">${imgTag(p)}</div>`).join('')}</div>`;
       const head = i === 0 ? `<div class="sec"><h2><i>${photoNo}</i>현장 사진</h2></div>` : '';
       let pg = pages[pages.length - 1];
       const ftEl = pg.querySelector('.ft');
+      const full = (onPage.get(pg) || 0) + n > PER_PAGE;
       ftEl.insertAdjacentHTML('beforebegin', head + row);
-      if (!fits(pg)) {
+      if (full || !fits(pg)) {
         // 방금 넣은 것 빼고 새 장으로
         const added = [...pg.children].slice([...pg.children].indexOf(ftEl) - (head ? 2 : 1), [...pg.children].indexOf(ftEl));
         added.forEach((n) => n.remove());
         pg = newPage(`<div class="top mini"><img src="${logoUrl}" /><div class="t"><h1>${title}</h1><div class="s">${esc(r.site || '')} · 현장 사진 (이어서)</div></div></div>`);
         pg.querySelector('.ft').insertAdjacentHTML('beforebegin', (head || `<div class="sec"><h2><i>${photoNo}</i>현장 사진 (이어서)</h2></div>`) + row);
       }
+      onPage.set(pg, (onPage.get(pg) || 0) + n);
     }
     const written = md(r.writtenOn || '') || '';
     pages.forEach((pg, i) => { pg.querySelector('.pg').textContent = `작성일 ${written}${pages.length > 1 ? `  ·  ${i + 1} / ${pages.length}` : ''}`; });

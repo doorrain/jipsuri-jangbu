@@ -1752,8 +1752,7 @@ function fileReadySheet(blob, filename, type) {
 }
 
 /* ---------- 작업 보고서 ---------- */
-// 보고서 사진: 한 칸에 모아 보고서 아래쪽에 넣음 (A4 1장에 맞추려고 최대 6장)
-const REPORT_MAX = 6;
+// 보고서 사진: 한 칸에 모아 보고서 아래쪽에 넣음. 장수 제한 없음 (PDF에서 A4 한 장에 6장씩 넘어감)
 // 예전 보고서(현장 확인 사진 / 작업 사진 따로)도 한 줄로 합쳐 읽음
 const reportPhotoIds = (r) => [...new Set([...(r.photos || []), ...(r.checkPhotos || []), ...(r.donePhotos || [])])];
 
@@ -1782,8 +1781,8 @@ function reportDefaults(j, type) {
       check: '',
       // 날짜별 작업 내용을 이어 붙여 요약 (고쳐서 쓸 수 있음). 예전 보고서의 '현장 확인'도 함께
       done: reps.map((r) => { const t = [r.check, r.done].filter(Boolean).join(' → '); return t && `· ${r.dateLabel || md(r.writtenOn)}: ${t}`; }).filter(Boolean).join('\n'),
-      // 처음 보고서 사진 2장 + 마지막 쪽 보고서 사진들 (최대 6장)
-      photos: uniq([...reportPhotoIds(reps[0] || {}).slice(0, 2), ...reps.slice().reverse().flatMap(reportPhotoIds)]).slice(0, REPORT_MAX),
+      // 지금까지 보고서에 넣은 사진 전부 (보고서 순서대로)
+      photos: uniq(reps.flatMap(reportPhotoIds)),
     };
   }
   const prev = reps[reps.length - 1];
@@ -1803,7 +1802,7 @@ function reportSheet(j0, repId, type) {
   const seq = cur?.seq || (j.reports || []).filter((r) => r.type !== '최종').length + 1;
   const r = cur ? { ...cur } : { id: newId('rp'), type, seq: type === '최종' ? 0 : seq, writtenOn: today(), ...reportDefaults(j, type) };
   const isFinal = type === '최종';
-  let picked = reportPhotoIds(r).filter((id) => (j.photos || []).some((p) => p.id === id)).slice(0, REPORT_MAX);
+  let picked = reportPhotoIds(r).filter((id) => (j.photos || []).some((p) => p.id === id));
   const s = openSheet(`
     ${sheetHead(isFinal ? '최종 보고서' : `작업 보고서 · ${seq}차`)}
     <p class="muted small" style="margin-top:-6px">${isFinal ? '지금까지 쓴 보고서를 모아 요약했어요. 고쳐서 쓰면 돼요.' : '현장명·작업 날짜는 자동으로 들어가요. 고객 전화번호는 넣지 않아요.'}</p>
@@ -1827,7 +1826,7 @@ function reportSheet(j0, repId, type) {
     const all = freshJob(j).photos || [];
     const byId = (id) => all.find((p) => p.id === id);
     picked = picked.filter(byId);
-    $('#rp-n', s).textContent = `${picked.length}/${REPORT_MAX}장 · 누르면 빠져요`;
+    $('#rp-n', s).textContent = picked.length ? `${picked.length}장 · 누르면 빠져요` : '';
     $('#rp-photos', s).innerHTML = picked.length
       ? `<div class="photos ph-order">${picked.map((id, i) => thumb(byId(id), i)).join('')}</div>`
       : '<div class="faint small">사진을 올리면 바로 보고서 아래쪽에 들어가요</div>';
@@ -1837,7 +1836,6 @@ function reportSheet(j0, repId, type) {
     $$('[data-rpid]', s).forEach((b) => (b.onclick = () => {
       const id = b.dataset.rpid;
       if (picked.includes(id)) picked = picked.filter((x) => x !== id);
-      else if (picked.length >= REPORT_MAX) return toast(`사진은 ${REPORT_MAX}장까지 넣을 수 있어요 (한 장에 맞추려고)`);
       else picked = [...picked, id];
       drawPhotos();
     }));
@@ -1876,10 +1874,9 @@ function reportSheet(j0, repId, type) {
       const added = await uploadPhotos(j.id, files, '', (i, n) => toast(`사진 올리는 중… ${i}/${n}`));
       const f = freshJob(j);
       await save('jobs', { ...f, photos: [...(f.photos || []), ...added] });
-      const room = REPORT_MAX - picked.length;
-      picked = [...picked, ...added.slice(0, Math.max(room, 0)).map((p) => p.id)];
+      picked = [...picked, ...added.map((p) => p.id)];
       drawPhotos();
-      toast(added.length > room ? `사진 ${added.length}장을 올렸어요. 보고서에는 ${REPORT_MAX}장까지만 들어가요` : `사진 ${added.length}장을 보고서에 넣었어요`);
+      toast(`사진 ${added.length}장을 보고서에 넣었어요`);
     } catch (err) {
       console.error(err);
       alert('사진을 올리지 못했어요.\n' + (err.message || ''));

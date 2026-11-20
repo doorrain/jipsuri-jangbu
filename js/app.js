@@ -1215,7 +1215,7 @@ function renderJob(id) {
 
     <div class="card">
       <h3>${ic('clip')} 작업 보고서 <span class="r">${reports.length ? reports.length + '건' : ''}</span></h3>
-      ${reports.map((r) => `<button class="pay" data-rep="${r.id}"><span class="grow"><b>${r.type === '최종' ? '최종 보고서' : `${r.seq}차 보고`}</b> <span class="muted small">${esc(r.dateLabel || '')} · 작성 ${esc(md(r.writtenOn))}</span></span><span class="faint" style="display:flex">${ic('right')}</span></button>`).join('')
+      ${reports.map((r) => `<button class="pay" data-rep="${r.id}"><span class="grow"><b>${r.type === '최종' ? '최종 보고서' : `${r.seq}차 보고`}</b> <span class="muted small">${esc(cleanDateLabel(r.dateLabel, r.writtenOn))} · 작성 ${esc(md(r.writtenOn))}</span></span><span class="faint" style="display:flex">${ic('right')}</span></button>`).join('')
     || '<div class="muted small">집주인·관리인에게 보낼 작업 보고서를 PDF 1장으로 만들어요. 고객 전화번호는 들어가지 않아요.</div>'}
       <div class="btns"><button class="add-line" id="rep-new">${ic('plus')} 작업 보고서 작성</button>${reports.some((r) => r.type !== '최종') ? '<button class="add-line" id="rep-final">최종 보고서</button>' : ''}</div>
     </div>
@@ -1768,6 +1768,18 @@ function upcomingWork(j, from = today()) {
   return lines.sort((a, b) => a.date.localeCompare(b.date)).map((x) => '· ' + x.t).join('\n');
 }
 
+// 보고서 작업 날짜: '2026년 11월 20일 금요일' (며칠째인지 표시는 넣지 않음)
+const longDate = (s) => { const d = toDate(s); return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${weekday(s)}요일`; };
+// 예전에 저장한 '11/20(금) (3/4일차)' 같은 날짜도 같은 모양으로 바꿈
+function cleanDateLabel(label, writtenOn) {
+  const year = (writtenOn || today()).slice(0, 4);
+  return String(label || '')
+    .replace(/\s*\(\d+\/\d+일차\)/g, '')
+    .replace(/\s*\(\d+일\)/g, '')
+    .replace(/(\d{1,2})\/(\d{1,2})\((.)\)/g, `${year}년 $1월 $2일 $3요일`)
+    .trim();
+}
+
 function reportDefaults(j, type) {
   const reps = [...(j.reports || [])].filter((r) => r.type !== '최종').sort((a, b) => (a.at || '').localeCompare(b.at || ''));
   const dayToday = dayOf(j, today());
@@ -1776,19 +1788,18 @@ function reportDefaults(j, type) {
     const first = ds[0]?.date || reps[0]?.writtenOn || j.date, lastD = ds[ds.length - 1]?.date || reps[reps.length - 1]?.writtenOn || today();
     const uniq = (a) => [...new Set(a.filter(Boolean))];
     return {
-      dateLabel: first && lastD && first !== lastD ? `${md(first)} ~ ${md(lastD)}${ds.length > 1 ? ` (${ds.length}일)` : ''}` : md(first || today()),
+      dateLabel: first && lastD && first !== lastD ? `${longDate(first)} ~ ${longDate(lastD)}` : longDate(first || today()),
       request: reps[0]?.request || j.work || '',
       check: '',
       // 날짜별 작업 내용을 이어 붙여 요약 (고쳐서 쓸 수 있음). 예전 보고서의 '현장 확인'도 함께
-      done: reps.map((r) => { const t = [r.check, r.done].filter(Boolean).join(' → '); return t && `· ${r.dateLabel || md(r.writtenOn)}: ${t}`; }).filter(Boolean).join('\n'),
+      done: reps.map((r) => { const t = [r.check, r.done].filter(Boolean).join(' → '); return t && `· ${cleanDateLabel(r.dateLabel, r.writtenOn) || md(r.writtenOn)}: ${t}`; }).filter(Boolean).join('\n'),
       // 지금까지 보고서에 넣은 사진 전부 (보고서 순서대로)
       photos: uniq(reps.flatMap(reportPhotoIds)),
     };
   }
   const prev = reps[reps.length - 1];
-  const all = workDays(j);
   return {
-    dateLabel: dayToday ? `${md(today())} (${all.indexOf(dayToday) + 1}/${all.length}일차)` : md(today()),
+    dateLabel: longDate(today()),
     request: prev?.request || j.work || '',
     // 작업 내용은 오늘 작업일에 적어 둔 할 일로 시작, 남은 작업은 이후 일정을 자동으로
     check: '', done: dayToday?.note || '', remain: upcomingWork(j), photos: [],
@@ -1807,7 +1818,7 @@ function reportSheet(j0, repId, type) {
     ${sheetHead(isFinal ? '최종 보고서' : `작업 보고서 · ${seq}차`)}
     <p class="muted small" style="margin-top:-6px">${isFinal ? '지금까지 쓴 보고서를 모아 요약했어요. 고쳐서 쓰면 돼요.' : '현장명·작업 날짜는 자동으로 들어가요. 고객 전화번호는 넣지 않아요.'}</p>
     <div class="kv"><span class="muted">현장명</span><span class="v">${esc(custName(customerOf(j)))}</span></div>
-    <label class="field" style="margin-top:8px"><span>작업 날짜</span><input id="rp-date" value="${esc(r.dateLabel)}" /></label>
+    <label class="field" style="margin-top:8px"><span>작업 날짜</span><input id="rp-date" value="${esc(cleanDateLabel(r.dateLabel, r.writtenOn))}" /></label>
     <label class="field"><span>1. 작업 요청 <span class="faint">고객이 요청한 내용</span></span><textarea id="rp-req" rows="3">${esc(r.request)}</textarea></label>
     <label class="field"><span>2. ${isFinal ? '작업 경과 및 완료' : '작업 내용'} <span class="faint">확인한 문제와 어디를 어떻게 고쳤는지</span></span><textarea id="rp-done" rows="${isFinal ? 6 : 4}" placeholder="예) 욕실 벽 타일 들뜸 확인 → 들뜬 타일 철거 후 방수, 새 타일 시공">${esc(r.done)}</textarea></label>
     ${isFinal ? '' : `<div class="field"><span>3. 남은 작업 <span class="faint">이 작업에 잡힌 이후 일정</span></span><textarea id="rp-remain" rows="3" placeholder="이후 작업일·할 일·A/S가 있으면 자동으로 들어가요">${esc(r.remain || '')}</textarea>

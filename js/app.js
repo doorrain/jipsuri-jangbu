@@ -1214,10 +1214,10 @@ function renderJob(id) {
     </div>
 
     <div class="card">
-      <h3>${ic('clip')} 작업 보고서 <span class="r">${reports.length ? reports.length + '건' : ''}</span></h3>
-      ${reports.map((r) => `<button class="pay" data-rep="${r.id}"><span class="grow"><b>${r.type === '최종' ? '최종 보고서' : `${r.seq}차 보고`}</b> <span class="muted small">${esc(cleanDateLabel(r.dateLabel, r.writtenOn))} · 작성 ${esc(md(r.writtenOn))}</span></span><span class="faint" style="display:flex">${ic('right')}</span></button>`).join('')
-    || '<div class="muted small">집주인·관리인에게 보낼 작업 보고서를 PDF 1장으로 만들어요. 고객 전화번호는 들어가지 않아요.</div>'}
-      <div class="btns"><button class="add-line" id="rep-new">${ic('plus')} 작업 보고서 작성</button>${reports.some((r) => r.type !== '최종') ? '<button class="add-line" id="rep-final">최종 보고서</button>' : ''}</div>
+      <h3>${ic('clip')} 작업 내역서 <span class="r">${reports.length ? reports.length + '건' : ''}</span></h3>
+      ${reports.map((r) => `<button class="pay" data-rep="${r.id}"><span class="grow"><b>${r.type === '최종' ? '최종 작업 내역서' : `작업 내역서 ${r.seq}차`}</b> <span class="muted small">${esc(cleanDateLabel(r.dateLabel, r.writtenOn))} · 작성 ${esc(md(r.writtenOn))}</span></span><span class="faint" style="display:flex">${ic('right')}</span></button>`).join('')
+    || '<div class="muted small">집주인·관리인에게 보낼 작업 내역서를 PDF로 만들어요. 고객 전화번호는 들어가지 않아요.</div>'}
+      <div class="btns"><button class="add-line" id="rep-new">${ic('plus')} 작업 내역서 작성</button>${reports.some((r) => r.type !== '최종') ? '<button class="add-line" id="rep-final">최종 작업 내역서</button>' : ''}</div>
     </div>
 
     <div class="card">
@@ -1297,7 +1297,7 @@ function renderJob(id) {
   zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
   zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('drag'); attachQuoteFiles(j.id, [...(e.dataTransfer?.files || [])]); });
-  // 작업 보고서
+  // 작업 내역서
   $('#rep-new').onclick = () => reportSheet(j, null, '중간');
   $('#rep-final') && ($('#rep-final').onclick = () => reportSheet(j, null, '최종'));
   $$('[data-rep]').forEach((b) => (b.onclick = () => reportSheet(j, b.dataset.rep)));
@@ -1751,7 +1751,7 @@ function fileReadySheet(blob, filename, type) {
   $('#fr-dl', s).onclick = () => { download(blob, filename); toast('내려받았어요'); };
 }
 
-/* ---------- 작업 보고서 ---------- */
+/* ---------- 작업 내역서 (예전 이름: 작업 보고서) ---------- */
 // 보고서 사진: 한 칸에 모아 보고서 아래쪽에 넣음. 장수 제한 없음 (PDF에서 A4 한 장에 6장씩 넘어감)
 // 예전 보고서(현장 확인 사진 / 작업 사진 따로)도 한 줄로 합쳐 읽음
 const reportPhotoIds = (r) => [...new Set([...(r.photos || []), ...(r.checkPhotos || []), ...(r.donePhotos || [])])];
@@ -1815,15 +1815,15 @@ function reportSheet(j0, repId, type) {
   const isFinal = type === '최종';
   let picked = reportPhotoIds(r).filter((id) => (j.photos || []).some((p) => p.id === id));
   const s = openSheet(`
-    ${sheetHead(isFinal ? '최종 보고서' : `작업 보고서 · ${seq}차`)}
-    <p class="muted small" style="margin-top:-6px">${isFinal ? '지금까지 쓴 보고서를 모아 요약했어요. 고쳐서 쓰면 돼요.' : '현장명·작업 날짜는 자동으로 들어가요. 고객 전화번호는 넣지 않아요.'}</p>
+    ${sheetHead(isFinal ? '최종 작업 내역서' : `작업 내역서 · ${seq}차`)}
+    <p class="muted small" style="margin-top:-6px">${isFinal ? '지금까지 쓴 작업 내역서를 모아 요약했어요. 고쳐서 쓰면 돼요.' : '현장명·작업 날짜는 자동으로 들어가요. 고객 전화번호는 넣지 않아요.'}</p>
     <div class="kv"><span class="muted">현장명</span><span class="v">${esc(custName(customerOf(j)))}</span></div>
     <label class="field" style="margin-top:8px"><span>작업 날짜</span><input id="rp-date" value="${esc(cleanDateLabel(r.dateLabel, r.writtenOn))}" /></label>
     <label class="field"><span>1. 작업 요청 <span class="faint">고객이 요청한 내용</span></span><textarea id="rp-req" rows="3">${esc(r.request)}</textarea></label>
     <label class="field"><span>2. ${isFinal ? '작업 경과 및 완료' : '작업 내용'} <span class="faint">확인한 문제와 어디를 어떻게 고쳤는지</span></span><textarea id="rp-done" rows="${isFinal ? 6 : 4}" placeholder="예) 욕실 벽 타일 들뜸 확인 → 들뜬 타일 철거 후 방수, 새 타일 시공">${esc(r.done)}</textarea></label>
     ${isFinal ? '' : `<div class="field"><span>3. 남은 작업 <span class="faint">이 작업에 잡힌 이후 일정</span></span><textarea id="rp-remain" rows="3" placeholder="이후 작업일·할 일·A/S가 있으면 자동으로 들어가요">${esc(r.remain || '')}</textarea>
       <button type="button" class="btn sm ghost" id="rp-next" style="margin-top:6px">${ic('cal')} 이후 일정 다시 불러오기</button></div>`}
-    <div class="field"><span>보고서 사진 <span class="faint" id="rp-n"></span></span>
+    <div class="field"><span>내역서 사진 <span class="faint" id="rp-n"></span></span>
       <div id="rp-photos"></div>
       <div class="btns" style="margin-top:8px"><button type="button" class="add-line" id="rp-up" style="margin:0">${ic('camera')} 사진 올리기</button><button type="button" class="add-line" id="rp-pickbtn" style="margin:0">올린 현장 사진에서 고르기</button></div>
       <div id="rp-pick" hidden style="margin-top:10px"></div>
@@ -1840,7 +1840,7 @@ function reportSheet(j0, repId, type) {
     $('#rp-n', s).textContent = picked.length ? `${picked.length}장 · 누르면 빠져요` : '';
     $('#rp-photos', s).innerHTML = picked.length
       ? `<div class="photos ph-order">${picked.map((id, i) => thumb(byId(id), i)).join('')}</div>`
-      : '<div class="faint small">사진을 올리면 바로 보고서 아래쪽에 들어가요</div>';
+      : '<div class="faint small">사진을 올리면 바로 내역서 아래쪽에 들어가요</div>';
     const pick = $('#rp-pick', s);
     if (!pick.hidden) pick.innerHTML = all.length ? `<div class="photos ph-order">${all.map((p) => thumb(p, picked.indexOf(p.id))).join('')}</div>` : '<div class="faint small">올린 현장 사진이 없어요</div>';
     hydrateImgs(s);
@@ -1887,13 +1887,13 @@ function reportSheet(j0, repId, type) {
       await save('jobs', { ...f, photos: [...(f.photos || []), ...added] });
       picked = [...picked, ...added.map((p) => p.id)];
       drawPhotos();
-      toast(`사진 ${added.length}장을 보고서에 넣었어요`);
+      toast(`사진 ${added.length}장을 내역서에 넣었어요`);
     } catch (err) {
       console.error(err);
       alert('사진을 올리지 못했어요.\n' + (err.message || ''));
     }
   };
-  $('#rp-save', s).onclick = async () => { await persist(); closeSheet(); toast('보고서를 저장했어요'); };
+  $('#rp-save', s).onclick = async () => { await persist(); closeSheet(); toast('작업 내역서를 저장했어요'); };
   $('#rp-pdf', s).onclick = async () => {
     const btn = $('#rp-pdf', s);
     btn.disabled = true;
@@ -1913,7 +1913,7 @@ function reportSheet(j0, repId, type) {
     }
   };
   $('#rp-del', s) && ($('#rp-del', s).onclick = async () => {
-    if (!confirm('이 보고서를 지울까요? (사진은 그대로 남아요)')) return;
+    if (!confirm('이 작업 내역서를 지울까요? (사진은 그대로 남아요)')) return;
     const f = freshJob(j);
     await save('jobs', { ...f, reports: (f.reports || []).filter((x) => x.id !== r.id) });
     closeSheet();

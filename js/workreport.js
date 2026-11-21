@@ -1,4 +1,4 @@
-// 작업 보고서 PDF (A4): 집주인·관리인에게 보내는 작업 요청 / 작업 내용 / 남은 작업 / 현장 사진 보고.
+// 작업 내역서 PDF (A4): 집주인·관리인에게 보내는 작업 요청 / 작업 내용 / 남은 작업 / 현장 사진 보고.
 // 견적 앱처럼 A4 크기 HTML을 그린 뒤 이미지로 찍어 PDF에 붙입니다(한글 글꼴 문제 없음).
 // 고객 전화번호는 넣지 않고, 현장명(고객으로 등록한 이름 그대로)·작업 날짜만 넣습니다.
 // 사진은 장수 제한 없이 원본 비율 그대로 2장씩 넣고, A4 한 장에 최대 6장(3줄)을 기준으로
@@ -74,7 +74,7 @@ export async function makeReportPdf(r, logoUrl) {
   }
   const pics = await loadPhotos(r.photos || []);
   const isFinal = r.type === '최종';
-  const title = isFinal ? '최종 작업 보고서' : '작업 보고서';
+  const title = isFinal ? '최종 작업 내역서' : '작업 내역서';
   const done = [r.check, r.done].filter(Boolean).join('\n'); // 예전 보고서의 '현장 확인'은 작업 내용 앞에
   const photoNo = !isFinal && r.remain ? 4 : 3;
   const ft = `<div class="ft"><span>${COMPANY.name} · ${COMPANY.person} ${COMPANY.phone}</span><span class="pg"></span></div>`;
@@ -96,7 +96,7 @@ export async function makeReportPdf(r, logoUrl) {
   try {
     newPage(`
       <div class="top"><img src="${logoUrl}" /><div class="t"><h1>${title}</h1>
-        <div class="s">${isFinal ? '작업 전체 요약' : `작업 중간 보고${r.seq ? ` · ${r.seq}차` : ''}`}</div></div></div>
+        <div class="s">${isFinal ? '작업 전체 요약' : `작업 내역${r.seq ? ` · ${r.seq}차` : ''}`}</div></div></div>
       <table>
         <tr><th>현장명</th><td>${esc(r.site || '-')}</td></tr>
         <tr><th>작업 날짜</th><td>${esc(r.dateLabel || '-')}</td></tr>
@@ -137,7 +137,7 @@ export async function makeReportPdf(r, logoUrl) {
       pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, 210, 297);
     }
     const safe = (x) => String(x || '').replace(/[\\/:*?"<>|·\s]+/g, '_').slice(0, 30);
-    return { blob: pdf.output('blob'), filename: `${isFinal ? '최종작업보고서' : '작업보고서'}_${safe(r.site) || '현장'}_${(r.writtenOn || '').slice(5)}.pdf`, pages: pages.length };
+    return { blob: pdf.output('blob'), filename: `${isFinal ? '최종작업내역서' : '작업내역서'}_${safe(r.site) || '현장'}_${(r.writtenOn || '').slice(5)}.pdf`, pages: pages.length };
   } finally {
     pics.forEach((p) => URL.revokeObjectURL(p.url));
     stage.remove();
